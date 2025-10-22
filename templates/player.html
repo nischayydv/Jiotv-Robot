@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{{ channel_name }} - Jio TV</title>
+    
+    <!-- Shaka Player CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.7.10/controls.min.css">
+    
+    <!-- Telegram Web App SDK -->
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            overflow-x: hidden;
+            color: #fff;
+        }
+
+        .app-container {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+        }
+
+        .header {
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .channel-logo {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            object-fit: cover;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .channel-info {
+            flex: 1;
+        }
+
+        .channel-name {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 4px;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .channel-status {
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.7);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .live-indicator {
+            width: 8px;
+            height: 8px;
+            background: #ff4444;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.2); }
+        }
+
+        .player-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            padding: 20px;
+            position: relative;
+        }
+
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+            background: #000;
+        }
+
+        #video-container {
+            position: relative;
+            width: 100%;
+            padding-bottom: 56.25%; /* 16:9 aspect ratio */
+        }
+
+        #video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            transition: opacity 0.3s;
+        }
+
+        .loading-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .spinner {
+            width: 60px;
+            height: 60px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .error-message {
+            display: none;
+            background: rgba(255, 68, 68, 0.2);
+            border: 2px solid #ff4444;
+            border-radius: 12px;
+            padding: 20px;
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .error-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #ff4444;
+        }
+
+        .error-text {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
+            line-height: 1.5;
+        }
+
+        .retry-button {
+            margin-top: 15px;
+            padding: 10px 24px;
+            background: #fff;
+            color: #667eea;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .retry-button:active {
+            transform: scale(0.95);
+        }
+
+        .controls-info {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        /* Custom Shaka Player Controls */
+        .shaka-controls-button-panel {
+            background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 100%);
+        }
+
+        .shaka-play-button,
+        .shaka-volume-bar-container,
+        .shaka-fullscreen-button {
+            color: #fff !important;
+        }
+
+        .shaka-seek-bar-container {
+            background: rgba(255, 255, 255, 0.2) !important;
+        }
+
+        .shaka-seek-bar {
+            background: #667eea !important;
+        }
+
+        /* Fullscreen styles */
+        .video-wrapper:fullscreen,
+        .video-wrapper:-webkit-full-screen {
+            max-width: none;
+            border-radius: 0;
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 12px 15px;
+            }
+
+            .channel-logo {
+                width: 40px;
+                height: 40px;
+            }
+
+            .channel-name {
+                font-size: 16px;
+            }
+
+            .player-container {
+                padding: 15px;
+            }
+        }
+
+        /* Telegram theme integration */
+        body[data-theme="dark"] {
+            background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="header">
+            <img src="{{ channel_logo or 'https://via.placeholder.com/50?text=TV' }}" 
+                 alt="Channel Logo" 
+                 class="channel-logo"
+                 onerror="this.src='https://via.placeholder.com/50?text=TV'">
+            <div class="channel-info">
+                <div class="channel-name">{{ channel_name }}</div>
+                <div class="channel-status">
+                    <span class="live-indicator"></span>
+                    <span>LIVE</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="player-container">
+            <div class="video-wrapper">
+                <div id="video-container">
+                    <video id="video" 
+                           autoplay 
+                           playsinline
+                           webkit-playsinline></video>
+                    
+                    <div class="loading-overlay" id="loading">
+                        <div class="spinner"></div>
+                        <div class="loading-text">Loading stream...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="error-message" id="error">
+                <div class="error-title">⚠️ Playback Error</div>
+                <div class="error-text" id="error-text">
+                    Unable to load the stream. Please try again.
+                </div>
+                <button class="retry-button" onclick="retryStream()">
+                    🔄 Retry
+                </button>
+            </div>
+
+            <div class="controls-info">
+                💡 Tap the screen to show/hide controls
+            </div>
+        </div>
+    </div>
+
+    <!-- Shaka Player Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.7.10/shaka-player.compiled.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.7.10/shaka-player.ui.min.js"></script>
+
+    <script>
+        // Initialize Telegram Web App
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+        
+        // Apply Telegram theme
+        if (tg.colorScheme === 'dark') {
+            document.body.setAttribute('data-theme', 'dark');
+        }
+
+        // Channel ID from template
+        const CHANNEL_ID = {{ channel_id }};
+        
+        let player;
+        let ui;
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
+
+        // Initialize player
+        async function initPlayer() {
+            const video = document.getElementById('video');
+            const videoContainer = document.getElementById('video-container');
+            const loading = document.getElementById('loading');
+            const errorDiv = document.getElementById('error');
+            const errorText = document.getElementById('error-text');
+
+            try {
+                // Check if browser supports Shaka Player
+                if (!shaka.Player.isBrowserSupported()) {
+                    throw new Error('Browser not supported. Please use a modern browser.');
+                }
+
+                // Fetch channel data
+                const response = await fetch(`/api/channel/${CHANNEL_ID}`);
+                if (!response.ok) {
+                    throw new Error('Channel not found');
+                }
+
+                const channelData = await response.json();
+                const streamUrl = channelData.url;
+
+                // Create Shaka Player
+                player = new shaka.Player(video);
+
+                // Configure player
+                player.configure({
+                    streaming: {
+                        bufferingGoal: 30,
+                        rebufferingGoal: 10,
+                        bufferBehind: 30,
+                        retryParameters: {
+                            maxAttempts: 5,
+                            baseDelay: 1000,
+                            backoffFactor: 2,
+                            fuzzFactor: 0.5,
+                            timeout: 30000
+                        }
+                    },
+                    abr: {
+                        enabled: true,
+                        defaultBandwidthEstimate: 1000000
+                    }
+                });
+
+                // Error handling
+                player.addEventListener('error', onPlayerError);
+
+                // Create UI
+                ui = new shaka.ui.Overlay(player, videoContainer, video);
+                
+                // Configure UI
+                const config = {
+                    addSeekBar: true,
+                    addBigPlayButton: true,
+                    controlPanelElements: [
+                        'play_pause',
+                        'time_and_duration',
+                        'spacer',
+                        'mute',
+                        'volume',
+                        'fullscreen',
+                        'overflow_menu'
+                    ],
+                    overflowMenuButtons: [
+                        'quality',
+                        'captions',
+                        'playback_rate',
+                        'cast'
+                    ],
+                    castReceiverAppId: '',
+                    clearBufferOnQualityChange: false
+                };
+                
+                ui.configure(config);
+
+                // Custom UI styling
+                const controls = ui.getControls();
+                
+                // Load the stream
+                await player.load(streamUrl);
+                
+                // Hide loading overlay
+                loading.classList.add('hidden');
+                
+                // Auto-play
+                try {
+                    await video.play();
+                } catch (e) {
+                    console.log('Auto-play prevented, user interaction required');
+                }
+
+                // Reset retry count on success
+                retryCount = 0;
+
+                // Send ready status to Telegram
+                tg.MainButton.setText('Close Player');
+                tg.MainButton.show();
+                tg.MainButton.onClick(() => tg.close());
+
+            } catch (error) {
+                console.error('Error initializing player:', error);
+                loading.classList.add('hidden');
+                errorDiv.classList.add('show');
+                errorText.textContent = error.message || 'Failed to load stream. Please try again.';
+                
+                // Vibrate on error
+                if (tg.HapticFeedback) {
+                    tg.HapticFeedback.notificationOccurred('error');
+                }
+            }
+        }
+
+        function onPlayerError(event) {
+            console.error('Player error:', event.detail);
+            
+            const errorDiv = document.getElementById('error');
+            const errorText = document.getElementById('error-text');
+            const loading = document.getElementById('loading');
+            
+            loading.classList.add('hidden');
+            errorDiv.classList.add('show');
+            
+            let errorMessage = 'Playback error occurred.';
+            
+            if (event.detail) {
+                const code = event.detail.code;
+                
+                if (code === shaka.util.Error.Code.HTTP_ERROR) {
+                    errorMessage = 'Network error. Please check your connection.';
+                } else if (code === shaka.util.Error.Code.TIMEOUT) {
+                    errorMessage = 'Connection timeout. Please try again.';
+                } else if (code === shaka.util.Error.Code.UNABLE_TO_GUESS_MANIFEST_TYPE) {
+                    errorMessage = 'Invalid stream format.';
+                } else {
+                    errorMessage = event.detail.message || errorMessage;
+                }
+            }
+            
+            errorText.textContent = errorMessage;
+            
+            // Vibrate on error
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('error');
+            }
+        }
+
+        function retryStream() {
+            if (retryCount >= MAX_RETRIES) {
+                const errorText = document.getElementById('error-text');
+                errorText.textContent = 'Maximum retry attempts reached. Please go back and try again later.';
+                return;
+            }
+            
+            retryCount++;
+            
+            const errorDiv = document.getElementById('error');
+            const loading = document.getElementById('loading');
+            
+            errorDiv.classList.remove('show');
+            loading.classList.remove('hidden');
+            
+            // Clean up existing player
+            if (player) {
+                player.destroy();
+            }
+            
+            // Vibrate on retry
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.impactOccurred('light');
+            }
+            
+            // Retry after short delay
+            setTimeout(() => {
+                initPlayer();
+            }, 1000);
+        }
+
+        // Handle visibility change (pause when app is hidden)
+        document.addEventListener('visibilitychange', () => {
+            const video = document.getElementById('video');
+            if (document.hidden) {
+                video.pause();
+            } else {
+                video.play().catch(() => {});
+            }
+        });
+
+        // Prevent context menu
+        document.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+        });
+
+        // Initialize on load
+        window.addEventListener('load', () => {
+            initPlayer();
+        });
+
+        // Cleanup on unload
+        window.addEventListener('beforeunload', () => {
+            if (player) {
+                player.destroy();
+            }
+        });
+
+        // Handle back button
+        tg.BackButton.show();
+        tg.BackButton.onClick(() => {
+            tg.close();
+        });
+    </script>
+</body>
+</html>
