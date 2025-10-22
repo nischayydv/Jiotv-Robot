@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jio TV Bot - Live Streaming</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 600px;
+            width: 100%;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+
+        .logo {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 30px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border-radius: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 60px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+
+        h1 {
+            color: #2d3748;
+            font-size: 32px;
+            margin-bottom: 16px;
+            font-weight: 700;
+        }
+
+        .subtitle {
+            color: #718096;
+            font-size: 18px;
+            margin-bottom: 40px;
+            line-height: 1.6;
+        }
+
+        .features {
+            text-align: left;
+            margin-bottom: 40px;
+        }
+
+        .feature {
+            display: flex;
+            align-items: center;
+            padding: 16px;
+            margin-bottom: 12px;
+            background: #f7fafc;
+            border-radius: 12px;
+            transition: transform 0.2s;
+        }
+
+        .feature:hover {
+            transform: translateX(5px);
+        }
+
+        .feature-icon {
+            font-size: 28px;
+            margin-right: 16px;
+            min-width: 40px;
+        }
+
+        .feature-text {
+            flex: 1;
+        }
+
+        .feature-title {
+            color: #2d3748;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .feature-desc {
+            color: #718096;
+            font-size: 14px;
+        }
+
+        .telegram-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #0088cc, #0088cc);
+            color: white;
+            padding: 16px 40px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-size: 18px;
+            font-weight: 600;
+            box-shadow: 0 10px 30px rgba(0, 136, 204, 0.3);
+            transition: all 0.3s;
+        }
+
+        .telegram-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 40px rgba(0, 136, 204, 0.4);
+        }
+
+        .telegram-button::before {
+            content: "✈️ ";
+            margin-right: 8px;
+        }
+
+        .credits {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+            color: #a0aec0;
+            font-size: 14px;
+        }
+
+        .credits a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 30px 20px;
+            }
+
+            h1 {
+                font-size: 28px;
+            }
+
+            .subtitle {
+                font-size: 16px;
+            }
+
+            .logo {
+                width: 100px;
+                height: 100px;
+                font-size: 50px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">📺</div>
+        
+        <h1>Jio TV Bot</h1>
+        <p class="subtitle">
+            Watch live TV channels directly in Telegram with our advanced streaming bot!
+        </p>
+
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">🎬</div>
+                <div class="feature-text">
+                    <div class="feature-title">Multiple Categories</div>
+                    <div class="feature-desc">Browse channels by Sports, News, Entertainment & more</div>
+                </div>
+            </div>
+
+            <div class="feature">
+                <div class="feature-icon">🔍</div>
+                <div class="feature-text">
+                    <div class="feature-title">Smart Search</div>
+                    <div class="feature-desc">Find your favorite channels instantly</div>
+                </div>
+            </div>
+
+            <div class="feature">
+                <div class="feature-icon">📱</div>
+                <div class="feature-text">
+                    <div class="feature-title">Mini App Player</div>
+                    <div class="feature-desc">Beautiful Shaka Player with HD quality</div>
+                </div>
+            </div>
+
+            <div class="feature">
+                <div class="feature-icon">🔒</div>
+                <div class="feature-text">
+                    <div class="feature-title">Secure Streaming</div>
+                    <div class="feature-desc">Hidden URLs for protected content</div>
+                </div>
+            </div>
+        </div>
+
+        <a href="https://t.me/YOUR_BOT_USERNAME" class="telegram-button">
+            Open in Telegram
+        </a>
+
+        <div class="credits">
+            Made with ❤️ by <a href="https://t.me/NY_BOTS" target="_blank">@NY_BOTS</a>
+        </div>
+    </div>
+</body>
+</html>
