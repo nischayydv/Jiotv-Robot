@@ -25,11 +25,36 @@ class DataStore:
         self.m3u_url = M3U_URL
         self.channels = {}
         self.categories = {}
-    
+        
     def parse_m3u(self):
-        """Parse M3U playlist and organize by categories"""
-        if not self.m3u_url:
-            return False
+    if not self.m3u_url:
+        return False
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept": "*/*",
+        "Connection": "keep-alive"
+    }
+    
+    for attempt in range(3):
+        try:
+            response = requests.get(
+                self.m3u_url,
+                timeout=15,
+                headers=headers,
+                allow_redirects=True
+            )
+            response.raise_for_status()
+            content = response.text
+            break
+        except Exception as e:
+            logger.warning(f"Attempt {attempt+1} failed: {e}")
+            time.sleep(2)
+    else:
+        logger.error("❌ All attempts to fetch M3U failed.")
+        return False
+
+    # (Parsing logic stays the same)
         
         try:
             response = requests.get(self.m3u_url, timeout=30)
