@@ -1,709 +1,78 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TV Player</title>
-    <script src="https://cdn.jsdelivr.net/npm/shaka-player@4.7.0/dist/shaka-player.compiled.js"></script>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            background: #000;
-            color: #fff;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            overflow: hidden;
-        }
-
-        #container {
-            width: 100vw;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            position: relative;
-        }
-
-        #header {
-            background: linear-gradient(180deg, rgba(0,0,0,0.9) 0%, transparent 100%);
-            padding: 15px 20px;
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 100;
-            transition: opacity 0.3s, transform 0.3s;
-        }
-
-        #header.hidden {
-            opacity: 0;
-            transform: translateY(-100%);
-            pointer-events: none;
-        }
-
-        #channel-info {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-
-        #channel-logo {
-            width: 50px;
-            height: 50px;
-            object-fit: contain;
-            border-radius: 8px;
-            background: rgba(255,255,255,0.1);
-            padding: 5px;
-        }
-
-        #channel-details h1 {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-
-        #channel-details p {
-            font-size: 14px;
-            color: #888;
-        }
-
-        #video-container {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: #000;
-            position: relative;
-        }
-
-        #video {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-
-        #loading {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            z-index: 10;
-        }
-
-        #loading.hidden {
-            display: none;
-        }
-
-        .spinner {
-            border: 4px solid rgba(255,255,255,0.1);
-            border-top: 4px solid #fff;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 15px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        #error {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            background: rgba(255,0,0,0.9);
-            padding: 25px 40px;
-            border-radius: 12px;
-            max-width: 90%;
-            z-index: 20;
-            display: none;
-        }
-
-        #error.visible {
-            display: block;
-        }
-
-        #error h2 {
-            font-size: 20px;
-            margin-bottom: 10px;
-        }
-
-        #error p {
-            font-size: 14px;
-            opacity: 0.9;
-            margin-bottom: 15px;
-        }
-
-        #error button {
-            background: #fff;
-            color: #000;
-            border: none;
-            padding: 10px 25px;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-        }
-
-        #controls {
-            background: linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%);
-            padding: 20px;
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            z-index: 100;
-            transition: opacity 0.3s, transform 0.3s;
-        }
-
-        #controls.hidden {
-            opacity: 0;
-            transform: translateY(100%);
-            pointer-events: none;
-        }
-
-        #progress-container {
-            width: 100%;
-            height: 6px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 3px;
-            margin-bottom: 15px;
-            cursor: pointer;
-            position: relative;
-        }
-
-        #progress-bar {
-            height: 100%;
-            background: #ff0000;
-            border-radius: 3px;
-            width: 0%;
-            transition: width 0.1s;
-        }
-
-        #control-buttons {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 15px;
-        }
-
-        .btn-group {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        button {
-            background: rgba(255,255,255,0.1);
-            border: none;
-            color: #fff;
-            padding: 10px 15px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.2s;
-        }
-
-        button:hover {
-            background: rgba(255,255,255,0.2);
-        }
-
-        button:active {
-            background: rgba(255,255,255,0.3);
-        }
-
-        #play-pause {
-            font-size: 24px;
-            padding: 10px 20px;
-        }
-
-        #time-display {
-            font-size: 14px;
-            color: #ddd;
-            min-width: 100px;
-        }
-
-        #quality-selector {
-            background: rgba(255,255,255,0.1);
-            border: none;
-            color: #fff;
-            padding: 8px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        #quality-selector option {
-            background: #222;
-            color: #fff;
-        }
-
-        /* Mobile adjustments */
-        @media (max-width: 768px) {
-            #header {
-                padding: 10px 15px;
-            }
-
-            #channel-logo {
-                width: 40px;
-                height: 40px;
-            }
-
-            #channel-details h1 {
-                font-size: 16px;
-            }
-
-            #channel-details p {
-                font-size: 12px;
-            }
-
-            #controls {
-                padding: 15px;
-            }
-
-            #control-buttons {
-                flex-wrap: wrap;
-            }
-
-            .btn-group {
-                flex: 1;
-                justify-content: center;
-            }
-
-            button {
-                padding: 8px 12px;
-                font-size: 12px;
-            }
-
-            #play-pause {
-                font-size: 20px;
-                padding: 8px 16px;
-            }
-        }
-
-        .live-badge {
-            background: #ff0000;
-            color: #fff;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
-            display: inline-block;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <title>Live TV Player</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.3.7/shaka-player.compiled.js"></script>
+  <style>
+    body { margin:0; background:#000; display:flex; justify-content:center; align-items:center; height:100vh; }
+    #video { width:100%; max-width:960px; height:540px; background:#000; }
+  </style>
 </head>
 <body>
-    <div id="container">
-        <!-- Header -->
-        <div id="header">
-            <div id="channel-info">
-                <img id="channel-logo" src="" alt="Channel Logo">
-                <div id="channel-details">
-                    <h1 id="channel-name">Loading...</h1>
-                    <p id="channel-category">
-                        <span class="live-badge">🔴 LIVE</span>
-                    </p>
-                </div>
-            </div>
-        </div>
+  <video id="video" controls autoplay></video>
 
-        <!-- Video Container -->
-        <div id="video-container">
-            <video id="video" playsinline></video>
-            
-            <!-- Loading Spinner -->
-            <div id="loading">
-                <div class="spinner"></div>
-                <p>Loading stream...</p>
-            </div>
+  <script>
+    // Get channel ID from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const channelId = urlParams.get('id');
 
-            <!-- Error Message -->
-            <div id="error">
-                <h2>⚠️ Playback Error</h2>
-                <p id="error-message">Unable to load the stream</p>
-                <button onclick="location.reload()">🔄 Retry</button>
-            </div>
-        </div>
+    async function fetchChannelData(id) {
+      const res = await fetch(`/api/channel/${id}`);
+      if (!res.ok) throw new Error("Channel not found");
+      return await res.json();
+    }
 
-        <!-- Controls -->
-        <div id="controls">
-            <div id="progress-container">
-                <div id="progress-bar"></div>
-            </div>
-            <div id="control-buttons">
-                <div class="btn-group">
-                    <button id="play-pause">▶️</button>
-                    <span id="time-display">LIVE</span>
-                </div>
-                <div class="btn-group">
-                    <button id="mute-btn">🔊</button>
-                    <select id="quality-selector">
-                        <option value="auto">Auto Quality</option>
-                    </select>
-                    <button id="fullscreen-btn">⛶</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // Get channel ID from URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const channelId = urlParams.get('id');
-
-        // Elements
+    async function initPlayer() {
+      try {
+        const ch = await fetchChannelData(channelId);
         const video = document.getElementById('video');
-        const loading = document.getElementById('loading');
-        const error = document.getElementById('error');
-        const errorMessage = document.getElementById('error-message');
-        const header = document.getElementById('header');
-        const controls = document.getElementById('controls');
-        const playPauseBtn = document.getElementById('play-pause');
-        const muteBtn = document.getElementById('mute-btn');
-        const fullscreenBtn = document.getElementById('fullscreen-btn');
-        const qualitySelector = document.getElementById('quality-selector');
-        const progressBar = document.getElementById('progress-bar');
-
-        let player;
-        let hideControlsTimeout;
-        let channelData;
-
-        // Fetch channel data
-        async function loadChannel() {
-            try {
-                const response = await fetch(`/api/channel/${channelId}`);
-                if (!response.ok) throw new Error('Channel not found');
-                
-                channelData = await response.json();
-                
-                // Update UI with channel data
-                document.getElementById('channel-name').textContent = channelData.name || 'Unknown Channel';
-                document.getElementById('channel-logo').src = channelData.logo || '/static/default-logo.png';
-                document.title = `${channelData.name} - Live TV`;
-                
-                // Update category display (handle null category)
-                const categoryElement = document.getElementById('channel-category');
-                if (channelData.category) {
-                    categoryElement.innerHTML = `<span class="live-badge">🔴 LIVE</span> ${channelData.category}`;
-                } else {
-                    categoryElement.innerHTML = '<span class="live-badge">🔴 LIVE</span>';
-                }
-                
-                // Initialize player
-                await initPlayer();
-            } catch (err) {
-                showError('Failed to load channel data: ' + err.message);
-                console.error('Channel load error:', err);
-            }
-        }
 
         // Initialize Shaka Player
-        async function initPlayer() {
-            try {
-                // Check browser support
-                if (!shaka.Player.isBrowserSupported()) {
-                    showError('Your browser does not support video playback');
-                    return;
-                }
+        const player = new shaka.Player(video);
 
-                // Create player instance
-                player = new shaka.Player(video);
+        // Attach error handler
+        player.addEventListener('error', e => console.error('Shaka error', e));
 
-                // Configure player with optimized buffering
-                player.configure({
-                    streaming: {
-                        bufferingGoal: 30,
-                        rebufferingGoal: 2,
-                        bufferBehind: 30,
-                        retryParameters: {
-                            maxAttempts: 5,
-                            baseDelay: 1000,
-                            backoffFactor: 2,
-                            fuzzFactor: 0.5,
-                            timeout: 30000
-                        }
-                    }
-                });
+        const config = {};
 
-                // Setup request filter for cookie authentication
-                if (channelData.cookie) {
-                    player.getNetworkingEngine().registerRequestFilter((type, request) => {
-                        // Add cookie to all requests (manifest, segments, etc.)
-                        request.headers['Cookie'] = channelData.cookie;
-                    });
-                    console.log('✅ Cookie authentication configured');
-                }
-
-                // Setup DRM if provided
-                if (channelData.drmScheme && channelData.drmLicense) {
-                    setupDRM();
-                }
-
-                // Error handling
-                player.addEventListener('error', onPlayerError);
-
-                // Load the manifest
-                console.log('Loading stream:', channelData.link);
-                await player.load(channelData.link);
-                
-                // Setup quality selector
-                setupQualitySelector();
-
-                // Hide loading and start playback
-                loading.classList.add('hidden');
-                
-                // Auto-play with error handling
-                try {
-                    await video.play();
-                    playPauseBtn.textContent = '⏸️';
-                    console.log('✅ Stream loaded and playing');
-                } catch (playError) {
-                    console.warn('Autoplay prevented:', playError);
-                    playPauseBtn.textContent = '▶️';
-                }
-
-            } catch (err) {
-                showError(err.message || 'Failed to load stream');
-                console.error('Player initialization error:', err);
+        // If DRM is set
+        if (ch.drmScheme && ch.drmLicense) {
+          config.drm = {
+            servers: {
+              [ch.drmScheme]: ch.drmLicense
+            },
+            advanced: {
+              [ch.drmScheme]: {
+                'serverCertificate': null
+              }
             }
+          };
         }
 
-        // Setup DRM configuration
-        function setupDRM() {
-            try {
-                const scheme = channelData.drmScheme.toLowerCase();
-                
-                if (scheme === 'clearkey') {
-                    // Parse clearkey license (format: "key:kid")
-                    const parts = channelData.drmLicense.split(':');
-                    
-                    if (parts.length === 2) {
-                        const [keyHex, kidHex] = parts;
-                        
-                        // Convert hex to base64url format
-                        const keyBase64 = hexToBase64Url(keyHex);
-                        const kidBase64 = hexToBase64Url(kidHex);
-                        
-                        // Configure clearkeys
-                        player.configure({
-                            drm: {
-                                clearKeys: {
-                                    [kidBase64]: keyBase64
-                                }
-                            }
-                        });
-                        
-                        console.log('✅ ClearKey DRM configured');
-                        console.log('KID:', kidBase64);
-                        console.log('Key:', keyBase64);
-                    } else {
-                        console.error('Invalid clearkey format. Expected "key:kid"');
-                    }
-                    
-                } else if (scheme === 'widevine') {
-                    // Configure Widevine
-                    player.configure({
-                        drm: {
-                            servers: {
-                                'com.widevine.alpha': channelData.drmLicense
-                            }
-                        }
-                    });
-                    console.log('✅ Widevine DRM configured');
-                    
-                } else if (scheme === 'playready') {
-                    // Configure PlayReady
-                    player.configure({
-                        drm: {
-                            servers: {
-                                'com.microsoft.playready': channelData.drmLicense
-                            }
-                        }
-                    });
-                    console.log('✅ PlayReady DRM configured');
-                }
-            } catch (err) {
-                console.error('DRM setup error:', err);
+        // If cookie is set, use license request headers
+        if (ch.cookie) {
+          config.drm = config.drm || {};
+          config.drm.advanced = config.drm.advanced || {};
+          config.drm.advanced[ch.drmScheme || 'com.widevine.alpha'] = {
+            headers: {
+              'Cookie': ch.cookie
             }
+          };
         }
 
-        // Convert hex string to base64url (for ClearKey)
-        function hexToBase64Url(hexString) {
-            // Remove any spaces or colons
-            const hex = hexString.replace(/[s:-]/g, '');
-            
-            // Convert hex to bytes
-            const bytes = new Uint8Array(hex.length / 2);
-            for (let i = 0; i < hex.length; i += 2) {
-                bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
-            }
-            
-            // Convert bytes to base64
-            let base64 = btoa(String.fromCharCode.apply(null, bytes));
-            
-            // Convert base64 to base64url format (replace +/ with -_ and remove padding)
-            base64 = base64.replace(/+/g, '-').replace(///g, '_').replace(/=+$/, '');
-            
-            return base64;
-        }
+        player.configure(config);
 
-        // Setup quality selector with available tracks
-        function setupQualitySelector() {
-            const tracks = player.getVariantTracks();
-            
-            // Clear existing options
-            qualitySelector.innerHTML = '<option value="auto">Auto Quality</option>';
-            
-            // Get unique quality levels
-            const qualities = new Set();
-            tracks.forEach(track => {
-                if (track.height) {
-                    qualities.add(track.height);
-                }
-            });
-            
-            // Add quality options sorted from highest to lowest
-            Array.from(qualities).sort((a, b) => b - a).forEach(height => {
-                const option = document.createElement('option');
-                option.value = height;
-                option.textContent = `${height}p`;
-                qualitySelector.appendChild(option);
-            });
-            
-            // Handle quality change
-            qualitySelector.addEventListener('change', (e) => {
-                if (e.target.value === 'auto') {
-                    // Enable adaptive bitrate
-                    player.configure({abr: {enabled: true}});
-                    console.log('Quality set to: Auto');
-                } else {
-                    // Disable ABR and select specific quality
-                    player.configure({abr: {enabled: false}});
-                    const targetHeight = parseInt(e.target.value);
-                    const track = tracks.find(t => t.height === targetHeight);
-                    if (track) {
-                        player.selectVariantTrack(track);
-                        console.log('Quality set to:', targetHeight + 'p');
-                    }
-                }
-            });
-            
-            console.log('✅ Quality selector configured with', qualities.size, 'options');
-        }
+        // Load the video
+        await player.load(ch.link);
+        console.log('Video loaded:', ch.name);
+      } catch (err) {
+        console.error(err);
+        document.body.innerHTML = `<p style="color:white;text-align:center;">❌ Failed to load video: ${err.message}</p>`;
+      }
+    }
 
-        // Show error message
-        function showError(message) {
-            loading.classList.add('hidden');
-            errorMessage.textContent = message;
-            error.classList.add('visible');
-        }
-
-        // Handle player errors
-        function onPlayerError(event) {
-            const err = event.detail;
-            console.error('Shaka Player Error:', err);
-            
-            let message = 'Playback error occurred';
-            if (err.message) {
-                message = err.message;
-            } else if (err.code) {
-                message = `Error code: ${err.code}`;
-            }
-            
-            showError(message);
-        }
-
-        // Control button handlers
-        playPauseBtn.addEventListener('click', () => {
-            if (video.paused) {
-                video.play();
-                playPauseBtn.textContent = '⏸️';
-            } else {
-                video.pause();
-                playPauseBtn.textContent = '▶️';
-            }
-        });
-
-        muteBtn.addEventListener('click', () => {
-            video.muted = !video.muted;
-            muteBtn.textContent = video.muted ? '🔇' : '🔊';
-        });
-
-        fullscreenBtn.addEventListener('click', () => {
-            if (!document.fullscreenElement) {
-                document.getElementById('container').requestFullscreen().catch(err => {
-                    console.error('Fullscreen error:', err);
-                });
-            } else {
-                document.exitFullscreen();
-            }
-        });
-
-        // Auto-hide controls on inactivity
-        function resetHideControlsTimer() {
-            clearTimeout(hideControlsTimeout);
-            header.classList.remove('hidden');
-            controls.classList.remove('hidden');
-            
-            if (!video.paused) {
-                hideControlsTimeout = setTimeout(() => {
-                    header.classList.add('hidden');
-                    controls.classList.add('hidden');
-                }, 3000);
-            }
-        }
-
-        // Show controls on user interaction
-        document.getElementById('container').addEventListener('mousemove', resetHideControlsTimer);
-        document.getElementById('container').addEventListener('touchstart', resetHideControlsTimer);
-        document.getElementById('container').addEventListener('click', (e) => {
-            // Toggle play/pause on video click
-            if (e.target === video || e.target === document.getElementById('video-container')) {
-                if (video.paused) {
-                    video.play();
-                    playPauseBtn.textContent = '⏸️';
-                } else {
-                    video.pause();
-                    playPauseBtn.textContent = '▶️';
-                }
-            }
-            resetHideControlsTimer();
-        });
-
-        // Update controls visibility when video state changes
-        video.addEventListener('play', () => {
-            playPauseBtn.textContent = '⏸️';
-            resetHideControlsTimer();
-        });
-
-        video.addEventListener('pause', () => {
-            playPauseBtn.textContent = '▶️';
-            header.classList.remove('hidden');
-            controls.classList.remove('hidden');
-            clearTimeout(hideControlsTimeout);
-        });
-
-        // Start loading channel when page loads
-        if (channelId) {
-            loadChannel();
-        } else {
-            showError('No channel ID provided in URL');
-        }
-
-        // Cleanup on page unload
-        window.addEventListener('beforeunload', () => {
-            if (player) {
-                player.destroy();
-            }
-        });
-    </script>
+    initPlayer();
+  </script>
 </body>
 </html>
