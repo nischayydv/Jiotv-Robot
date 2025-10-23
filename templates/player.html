@@ -384,16 +384,24 @@
                 
                 channelData = await response.json();
                 
-                // Update UI
-                document.getElementById('channel-name').textContent = channelData.name;
+                // Update UI with channel data
+                document.getElementById('channel-name').textContent = channelData.name || 'Unknown Channel';
                 document.getElementById('channel-logo').src = channelData.logo || '/static/default-logo.png';
                 document.title = `${channelData.name} - Live TV`;
+                
+                // Update category display (handle null category)
+                const categoryElement = document.getElementById('channel-category');
+                if (channelData.category) {
+                    categoryElement.innerHTML = `<span class="live-badge">🔴 LIVE</span> ${channelData.category}`;
+                } else {
+                    categoryElement.innerHTML = '<span class="live-badge">🔴 LIVE</span>';
+                }
                 
                 // Initialize player
                 await initPlayer();
             } catch (err) {
-                showError('Failed to load channel data');
-                console.error(err);
+                showError('Failed to load channel data: ' + err.message);
+                console.error('Channel load error:', err);
             }
         }
 
@@ -406,10 +414,10 @@
                     return;
                 }
 
-                // Create player
+                // Create player instance
                 player = new shaka.Player(video);
 
-                // Configure player
+                // Configure player with optimized buffering
                 player.configure({
                     streaming: {
                         bufferingGoal: 30,
@@ -422,96 +430,139 @@
                             fuzzFactor: 0.5,
                             timeout: 30000
                         }
-                    },
-                    drm: {
-                        clearKeys: {}
                     }
                 });
 
-                // Setup DRM if needed
-                if (channelData.drmScheme && channelData.drmLicense) {
-                    setupDRM();
-                }
-
-                // Setup network filters for cookies
+                // Setup request filter for cookie authentication
                 if (channelData.cookie) {
                     player.getNetworkingEngine().registerRequestFilter((type, request) => {
+                        // Add cookie to all requests (manifest, segments, etc.)
                         request.headers['Cookie'] = channelData.cookie;
                     });
+                    console.log('✅ Cookie authentication configured');
+                }
+
+                // Setup DRM if provided
+                if (channelData.drmScheme && channelData.drmLicense) {
+                    setupDRM();
                 }
 
                 // Error handling
                 player.addEventListener('error', onPlayerError);
 
-                // Load manifest
+                // Load the manifest
+                console.log('Loading stream:', channelData.link);
                 await player.load(channelData.link);
                 
                 // Setup quality selector
                 setupQualitySelector();
 
-                // Hide loading, start playback
+                // Hide loading and start playback
                 loading.classList.add('hidden');
-                await video.play();
-                playPauseBtn.textContent = '⏸️';
+                
+                // Auto-play with error handling
+                try {
+                    await video.play();
+                    playPauseBtn.textContent = '⏸️';
+                    console.log('✅ Stream loaded and playing');
+                } catch (playError) {
+                    console.warn('Autoplay prevented:', playError);
+                    playPauseBtn.textContent = '▶️';
+                }
 
-                console.log('✅ Stream loaded successfully');
             } catch (err) {
                 showError(err.message || 'Failed to load stream');
-                console.error('Player error:', err);
+                console.error('Player initialization error:', err);
             }
         }
 
-        // Setup DRM
+        // Setup DRM configuration
         function setupDRM() {
-            if (channelData.drmScheme.toLowerCase() === 'clearkey') {
-                // Parse clearkey license (format: "key:kid")
-                const [keyHex, kidHex] = channelData.drmLicense.split(':');
+            try {
+                const scheme = channelData.drmScheme.toLowerCase();
                 
-                if (keyHex && kidHex) {
-                    // Convert hex to base64
-                    const keyBase64 = hexToBase64(keyHex);
-                    const kidBase64 = hexToBase64(kidHex);
+                if (scheme === 'clearkey') {
+                    // Parse clearkey license (format: "key:kid")
+                    const parts = channelData.drmLicense.split(':');
                     
+                    if (parts.length === 2) {
+                        const [keyHex, kidHex] = parts;
+                        
+                        // Convert hex to base64url format
+                        const keyBase64 = hexToBase64Url(keyHex);
+                        const kidBase64 = hexToBase64Url(kidHex);
+                        
+                        // Configure clearkeys
+                        player.configure({
+                            drm: {
+                                clearKeys: {
+                                    [kidBase64]: keyBase64
+                                }
+                            }
+                        });
+                        
+                        console.log('✅ ClearKey DRM configured');
+                        console.log('KID:', kidBase64);
+                        console.log('Key:', keyBase64);
+                    } else {
+                        console.error('Invalid clearkey format. Expected "key:kid"');
+                    }
+                    
+                } else if (scheme === 'widevine') {
+                    // Configure Widevine
                     player.configure({
                         drm: {
-                            clearKeys: {
-                                [kidBase64]: keyBase64
+                            servers: {
+                                'com.widevine.alpha': channelData.drmLicense
                             }
                         }
                     });
+                    console.log('✅ Widevine DRM configured');
                     
-                    console.log('✅ ClearKey DRM configured');
-                }
-            } else if (channelData.drmScheme.toLowerCase() === 'widevine') {
-                player.configure({
-                    drm: {
-                        servers: {
-                            'com.widevine.alpha': channelData.drmLicense
+                } else if (scheme === 'playready') {
+                    // Configure PlayReady
+                    player.configure({
+                        drm: {
+                            servers: {
+                                'com.microsoft.playready': channelData.drmLicense
+                            }
                         }
-                    }
-                });
-                console.log('✅ Widevine DRM configured');
+                    });
+                    console.log('✅ PlayReady DRM configured');
+                }
+            } catch (err) {
+                console.error('DRM setup error:', err);
             }
         }
 
-        // Hex to Base64 conversion
-        function hexToBase64(hexString) {
-            const hex = hexString.replace(/\s/g, '');
+        // Convert hex string to base64url (for ClearKey)
+        function hexToBase64Url(hexString) {
+            // Remove any spaces or colons
+            const hex = hexString.replace(/[s:-]/g, '');
+            
+            // Convert hex to bytes
             const bytes = new Uint8Array(hex.length / 2);
             for (let i = 0; i < hex.length; i += 2) {
                 bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
             }
-            return btoa(String.fromCharCode(...bytes));
+            
+            // Convert bytes to base64
+            let base64 = btoa(String.fromCharCode.apply(null, bytes));
+            
+            // Convert base64 to base64url format (replace +/ with -_ and remove padding)
+            base64 = base64.replace(/+/g, '-').replace(///g, '_').replace(/=+$/, '');
+            
+            return base64;
         }
 
-        // Setup quality selector
+        // Setup quality selector with available tracks
         function setupQualitySelector() {
             const tracks = player.getVariantTracks();
             
             // Clear existing options
             qualitySelector.innerHTML = '<option value="auto">Auto Quality</option>';
             
-            // Add quality options
+            // Get unique quality levels
             const qualities = new Set();
             tracks.forEach(track => {
                 if (track.height) {
@@ -519,6 +570,7 @@
                 }
             });
             
+            // Add quality options sorted from highest to lowest
             Array.from(qualities).sort((a, b) => b - a).forEach(height => {
                 const option = document.createElement('option');
                 option.value = height;
@@ -529,33 +581,47 @@
             // Handle quality change
             qualitySelector.addEventListener('change', (e) => {
                 if (e.target.value === 'auto') {
+                    // Enable adaptive bitrate
                     player.configure({abr: {enabled: true}});
+                    console.log('Quality set to: Auto');
                 } else {
+                    // Disable ABR and select specific quality
                     player.configure({abr: {enabled: false}});
                     const targetHeight = parseInt(e.target.value);
                     const track = tracks.find(t => t.height === targetHeight);
                     if (track) {
                         player.selectVariantTrack(track);
+                        console.log('Quality set to:', targetHeight + 'p');
                     }
                 }
             });
+            
+            console.log('✅ Quality selector configured with', qualities.size, 'options');
         }
 
-        // Show error
+        // Show error message
         function showError(message) {
             loading.classList.add('hidden');
             errorMessage.textContent = message;
             error.classList.add('visible');
         }
 
-        // Player error handler
+        // Handle player errors
         function onPlayerError(event) {
-            const error = event.detail;
-            console.error('Player error:', error);
-            showError(error.message || 'Playback error occurred');
+            const err = event.detail;
+            console.error('Shaka Player Error:', err);
+            
+            let message = 'Playback error occurred';
+            if (err.message) {
+                message = err.message;
+            } else if (err.code) {
+                message = `Error code: ${err.code}`;
+            }
+            
+            showError(message);
         }
 
-        // Control handlers
+        // Control button handlers
         playPauseBtn.addEventListener('click', () => {
             if (video.paused) {
                 video.play();
@@ -573,35 +639,63 @@
 
         fullscreenBtn.addEventListener('click', () => {
             if (!document.fullscreenElement) {
-                document.getElementById('container').requestFullscreen();
+                document.getElementById('container').requestFullscreen().catch(err => {
+                    console.error('Fullscreen error:', err);
+                });
             } else {
                 document.exitFullscreen();
             }
         });
 
-        // Hide/show controls on user activity
+        // Auto-hide controls on inactivity
         function resetHideControlsTimer() {
             clearTimeout(hideControlsTimeout);
             header.classList.remove('hidden');
             controls.classList.remove('hidden');
             
-            hideControlsTimeout = setTimeout(() => {
-                if (!video.paused) {
+            if (!video.paused) {
+                hideControlsTimeout = setTimeout(() => {
                     header.classList.add('hidden');
                     controls.classList.add('hidden');
-                }
-            }, 3000);
+                }, 3000);
+            }
         }
 
+        // Show controls on user interaction
         document.getElementById('container').addEventListener('mousemove', resetHideControlsTimer);
         document.getElementById('container').addEventListener('touchstart', resetHideControlsTimer);
-        document.getElementById('container').addEventListener('click', resetHideControlsTimer);
+        document.getElementById('container').addEventListener('click', (e) => {
+            // Toggle play/pause on video click
+            if (e.target === video || e.target === document.getElementById('video-container')) {
+                if (video.paused) {
+                    video.play();
+                    playPauseBtn.textContent = '⏸️';
+                } else {
+                    video.pause();
+                    playPauseBtn.textContent = '▶️';
+                }
+            }
+            resetHideControlsTimer();
+        });
 
-        // Start
+        // Update controls visibility when video state changes
+        video.addEventListener('play', () => {
+            playPauseBtn.textContent = '⏸️';
+            resetHideControlsTimer();
+        });
+
+        video.addEventListener('pause', () => {
+            playPauseBtn.textContent = '▶️';
+            header.classList.remove('hidden');
+            controls.classList.remove('hidden');
+            clearTimeout(hideControlsTimeout);
+        });
+
+        // Start loading channel when page loads
         if (channelId) {
             loadChannel();
         } else {
-            showError('No channel ID provided');
+            showError('No channel ID provided in URL');
         }
 
         // Cleanup on page unload
