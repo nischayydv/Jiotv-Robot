@@ -1,68 +1,60 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Live TV Player</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.3.7/shaka-player.compiled.js"></script>
-  <style>
-    body { margin:0; background:#000; display:flex; justify-content:center; align-items:center; height:100vh; }
-    #video { width:100%; max-width:960px; height:540px; background:#000; }
-  </style>
+<meta charset="UTF-8">
+<title>Live TV Player</title>
+<style>
+  body { background: #000; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin:0; }
+  h2 { text-align: center; margin-bottom: 30px; }
+  button { padding: 15px 25px; font-size: 18px; cursor: pointer; margin: 10px; }
+  input { width: 90%; max-width: 600px; padding: 10px; font-size: 16px; margin-bottom: 20px; }
+</style>
 </head>
 <body>
-  <video id="video" controls autoplay></video>
 
-  <script>
-    // Get channel ID from URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const channelId = urlParams.get('id');
+<h2 id="channelName">Loading...</h2>
+<input type="text" id="streamURL" readonly />
+<button id="copyBtn">Copy URL</button>
+<button id="openBtn">Open in VLC / Network Player</button>
 
-    async function fetchChannelData(id) {
-      const res = await fetch(`/api/channel/${id}`);
-      if (!res.ok) throw new Error("Channel not found");
-      return await res.json();
-    }
+<script>
+const urlParams = new URLSearchParams(window.location.search);
+const channelId = urlParams.get('id');
 
-    async function initPlayer() {
-      try {
+async function fetchChannelData(id) {
+    const res = await fetch(`/api/channel/${id}`);
+    if (!res.ok) throw new Error("Channel not found");
+    return await res.json();
+}
+
+async function initPlayer() {
+    try {
         const ch = await fetchChannelData(channelId);
-        if (!ch.link) throw new Error("Channel link missing");
+        document.getElementById('channelName').innerText = ch.name;
+        const input = document.getElementById('streamURL');
+        const copyBtn = document.getElementById('copyBtn');
+        const openBtn = document.getElementById('openBtn');
 
-        const video = document.getElementById('video');
-        const player = new shaka.Player(video);
+        input.value = ch.link;
 
-        // Log Shaka errors
-        player.addEventListener('error', e => {
-          console.error('Shaka Player Error:', e.detail);
-          alert('Shaka Player Error: ' + e.detail?.message || 'Unknown error');
-        });
+        copyBtn.onclick = () => {
+            input.select();
+            input.setSelectionRange(0, 99999);
+            document.execCommand('copy');
+            alert('✅ URL copied to clipboard!\n\nPaste it into VLC, MX Player, or any network stream app.');
+        };
 
-        // Configure Clearkey DRM if present
-        if (ch.drmScheme && ch.drmLicense) {
-          player.configure({
-            drm: {
-              servers: { [ch.drmScheme]: ch.drmLicense },
-              advanced: {
-                [ch.drmScheme]: {
-                  headers: ch.cookie ? { 'Cookie': ch.cookie } : {}
-                }
-              }
-            }
-          });
-        }
+        openBtn.onclick = () => {
+            alert(`⚠️ This stream must be opened in a network player app (VLC, MX Player, IPTV app).\n\nURL:\n${ch.link}`);
+        };
 
-        console.log("Loading video:", ch.link);
-        await player.load(ch.link);  // Load the DASH stream
-        console.log("✅ Video loaded:", ch.name);
-
-      } catch (err) {
-        console.error("Player init error:", err);
-        document.body.innerHTML = `<p style="color:white;text-align:center;">❌ Failed to load video: ${err.message}</p>`;
-      }
+    } catch (err) {
+        document.body.innerHTML = `<p style="color:red; text-align:center;">Failed to load: ${err.message}</p>`;
+        console.error(err);
     }
+}
 
-    // Initialize player
-    initPlayer();
-  </script>
+initPlayer();
+</script>
 </body>
 </html>
