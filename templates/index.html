@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jio TV Bot - Live Streaming</title>
+    <title>Jio TV Bot</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         * {
             margin: 0;
@@ -12,139 +13,136 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
+            color: #fff;
             padding: 20px;
         }
 
         .container {
-            max-width: 600px;
-            width: 100%;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 24px;
-            padding: 40px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             text-align: center;
+            max-width: 500px;
+            width: 100%;
         }
 
         .logo {
             width: 120px;
             height: 120px;
-            margin: 0 auto 30px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
             border-radius: 30px;
             display: flex;
             align-items: center;
             justify-content: center;
+            margin: 0 auto 30px;
             font-size: 60px;
-            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         }
 
         h1 {
-            color: #2d3748;
             font-size: 32px;
-            margin-bottom: 16px;
             font-weight: 700;
+            margin-bottom: 15px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
         }
 
-        .subtitle {
-            color: #718096;
+        .tagline {
             font-size: 18px;
+            opacity: 0.9;
             margin-bottom: 40px;
             line-height: 1.6;
         }
 
         .features {
-            text-align: left;
-            margin-bottom: 40px;
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         }
 
         .feature {
             display: flex;
             align-items: center;
-            padding: 16px;
-            margin-bottom: 12px;
-            background: #f7fafc;
-            border-radius: 12px;
-            transition: transform 0.2s;
+            margin-bottom: 20px;
+            text-align: left;
         }
 
-        .feature:hover {
-            transform: translateX(5px);
+        .feature:last-child {
+            margin-bottom: 0;
         }
 
         .feature-icon {
-            font-size: 28px;
-            margin-right: 16px;
+            font-size: 32px;
+            margin-right: 15px;
             min-width: 40px;
         }
 
         .feature-text {
-            flex: 1;
+            font-size: 16px;
+            line-height: 1.5;
         }
 
-        .feature-title {
-            color: #2d3748;
-            font-weight: 600;
-            margin-bottom: 4px;
-        }
-
-        .feature-desc {
-            color: #718096;
-            font-size: 14px;
-        }
-
-        .telegram-button {
+        .cta-button {
             display: inline-block;
-            background: linear-gradient(135deg, #0088cc, #0088cc);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 16px 40px;
-            border-radius: 12px;
+            padding: 15px 40px;
+            border-radius: 50px;
             text-decoration: none;
             font-size: 18px;
             font-weight: 600;
-            box-shadow: 0 10px 30px rgba(0, 136, 204, 0.3);
-            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            transition: transform 0.3s, box-shadow 0.3s;
+            border: 2px solid rgba(255, 255, 255, 0.3);
         }
 
-        .telegram-button:hover {
+        .cta-button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 15px 40px rgba(0, 136, 204, 0.4);
-        }
-
-        .telegram-button::before {
-            content: "✈️ ";
-            margin-right: 8px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
         }
 
         .credits {
             margin-top: 30px;
-            padding-top: 20px;
-            border-top: 1px solid #e2e8f0;
-            color: #a0aec0;
             font-size: 14px;
+            opacity: 0.8;
         }
 
-        .credits a {
-            color: #667eea;
-            text-decoration: none;
-            font-weight: 600;
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
         }
 
-        @media (max-width: 768px) {
-            .container {
-                padding: 30px 20px;
-            }
+        .stat {
+            text-align: center;
+        }
 
+        .stat-number {
+            font-size: 28px;
+            font-weight: 700;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+
+        @media (max-width: 480px) {
             h1 {
-                font-size: 28px;
+                font-size: 26px;
             }
 
-            .subtitle {
+            .tagline {
                 font-size: 16px;
             }
 
@@ -152,6 +150,14 @@
                 width: 100px;
                 height: 100px;
                 font-size: 50px;
+            }
+
+            .feature-icon {
+                font-size: 28px;
+            }
+
+            .feature-text {
+                font-size: 14px;
             }
         }
     </style>
@@ -161,51 +167,86 @@
         <div class="logo">📺</div>
         
         <h1>Jio TV Bot</h1>
-        <p class="subtitle">
-            Watch live TV channels directly in Telegram with our advanced streaming bot!
-        </p>
+        <p class="tagline">Watch unlimited live TV channels directly in Telegram. Free, fast, and secure!</p>
 
         <div class="features">
             <div class="feature">
                 <div class="feature-icon">🎬</div>
                 <div class="feature-text">
-                    <div class="feature-title">Multiple Categories</div>
-                    <div class="feature-desc">Browse channels by Sports, News, Entertainment & more</div>
+                    <strong>Live Streaming</strong><br>
+                    Watch 500+ channels in HD quality
+                </div>
+            </div>
+
+            <div class="feature">
+                <div class="feature-icon">🗂️</div>
+                <div class="feature-text">
+                    <strong>Smart Categories</strong><br>
+                    AI-powered channel organization
                 </div>
             </div>
 
             <div class="feature">
                 <div class="feature-icon">🔍</div>
                 <div class="feature-text">
-                    <div class="feature-title">Smart Search</div>
-                    <div class="feature-desc">Find your favorite channels instantly</div>
-                </div>
-            </div>
-
-            <div class="feature">
-                <div class="feature-icon">📱</div>
-                <div class="feature-text">
-                    <div class="feature-title">Mini App Player</div>
-                    <div class="feature-desc">Beautiful Shaka Player with HD quality</div>
+                    <strong>Quick Search</strong><br>
+                    Find your favorite channels instantly
                 </div>
             </div>
 
             <div class="feature">
                 <div class="feature-icon">🔒</div>
                 <div class="feature-text">
-                    <div class="feature-title">Secure Streaming</div>
-                    <div class="feature-desc">Hidden URLs for protected content</div>
+                    <strong>Secure Player</strong><br>
+                    Protected streams with no ads
                 </div>
             </div>
         </div>
 
-        <a href="https://t.me/YOUR_BOT_USERNAME" class="telegram-button">
-            Open in Telegram
+        <a href="http://t.me/Jiotv_ny_Robot" class="cta-button">
+            🚀 Start Watching Now
         </a>
 
+        <div class="stats">
+            <div class="stat">
+                <span class="stat-number" id="channels">500+</span>
+                <span class="stat-label">Channels</span>
+            </div>
+            <div class="stat">
+                <span class="stat-number" id="categories">15+</span>
+                <span class="stat-label">Categories</span>
+            </div>
+            <div class="stat">
+                <span class="stat-number">HD</span>
+                <span class="stat-label">Quality</span>
+            </div>
+        </div>
+
         <div class="credits">
-            Made with ❤️ by <a href="https://t.me/NY_BOTS" target="_blank">@NY_BOTS</a>
+            Made with ❤️ by @NY_BOTS
         </div>
     </div>
+
+    <script>
+        // Initialize Telegram WebApp
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        // Fetch stats from server
+        fetch('/health')
+            .then(res => res.json())
+            .then(data => {
+                if (data.channels) {
+                    document.getElementById('channels').textContent = data.channels + '+';
+                }
+            })
+            .catch(err => console.error('Error fetching stats:', err));
+
+        // Close on button click
+        tg.MainButton.setText('Close');
+        tg.MainButton.show();
+        tg.MainButton.onClick(() => tg.close());
+    </script>
 </body>
 </html>
