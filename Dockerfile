@@ -1,37 +1,33 @@
 FROM python:3.11-slim
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    curl \
-    libffi-dev \
-    && rm -rf /var/lib/apt/lists/*
-
+# Set working directory
 WORKDIR /app
 
-# Copy requirements and install dependencies
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
 COPY requirements.txt .
 
-# Upgrade pip and install dependencies with retries for stability
-RUN python -m pip install --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir --default-timeout=100 --retries=5 -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY . .
+COPY bot.py .
+COPY templates/ ./templates/
+COPY static/ ./static/
 
-# Ensure templates folder exists
-RUN mkdir -p templates
+# Create static directory if it doesn't exist
+RUN mkdir -p static
 
-# Health check endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:5000/health || exit 1
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PORT=5000
 
 # Expose port
 EXPOSE 5000
 
-# Default web service command
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "app:app"]
+# Run the bot
+CMD ["python", "bot.py"]
