@@ -4,6 +4,7 @@ import threading
 import logging
 from ipytv import playlist
 from ipytv.playlist import M3UPlaylist, IPTVAttr
+import requests
 import time
 
 # Configure logging
@@ -33,11 +34,10 @@ class ChannelManager:
     
     def parse_m3u_direct(self, url):
         """
-        BEST METHOD: Use IPyTV's built-in loadu() function
-        - Direct URL loading
-        - Built-in error handling
-        - Optimized parsing
-        - No manual fetch needed!
+        BEST METHOD: Manual fetch with proper headers + IPyTV parsing
+        - Custom headers for dynamic PHP endpoints
+        - Works with stream apps and browsers
+        - Proper User-Agent spoofing
         """
         if self.loading:
             logger.info("⏳ Already loading - skipping")
@@ -48,15 +48,58 @@ class ChannelManager:
         
         try:
             logger.info("="*70)
-            logger.info("🌟 DIRECT IPYTV URL LOADING 🌟")
+            logger.info("🌟 ENHANCED M3U LOADING WITH CUSTOM HEADERS 🌟")
             logger.info("="*70)
             logger.info(f"🔗 URL: {url}")
-            logger.info("🔧 Method: playlist.loadu() - IPyTV's native URL loader")
+            logger.info("🔧 Method: Manual fetch + IPyTV parsing")
             logger.info("="*70)
             
-            # DIRECT METHOD - IPyTV handles everything!
-            logger.info("📡 Loading M3U directly from URL...")
-            m3u_playlist = playlist.loadu(url)
+            # Import requests here
+            import requests
+            
+            # Custom headers that mimic IPTV player apps
+            headers = {
+                'User-Agent': 'VLC/3.0.18 LibVLC/3.0.18',  # VLC user agent
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Referer': 'https://public.kliv.fun/',
+                'Origin': 'https://public.kliv.fun'
+            }
+            
+            logger.info("📡 Fetching M3U with IPTV player headers...")
+            logger.info(f"🔧 User-Agent: {headers['User-Agent']}")
+            
+            # Fetch with custom headers
+            session = requests.Session()
+            response = session.get(
+                url,
+                headers=headers,
+                timeout=120,
+                allow_redirects=True,
+                stream=False
+            )
+            
+            response.raise_for_status()
+            content = response.text
+            
+            logger.info(f"✅ Fetched {len(content):,} bytes")
+            
+            if not content.strip():
+                logger.error("❌ Empty content received")
+                return False
+            
+            # Save to temp file
+            temp_file = '/tmp/playlist_custom.m3u'
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            logger.info(f"💾 Saved to {temp_file}")
+            
+            # Now parse with IPyTV
+            logger.info("🔄 Parsing with IPyTV...")
+            m3u_playlist = playlist.loadf(temp_file)
             
             if not m3u_playlist or len(m3u_playlist) == 0:
                 logger.error("❌ IPyTV returned empty playlist or failed to load")
