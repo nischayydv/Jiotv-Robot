@@ -1,37 +1,41 @@
 FROM python:3.11-slim
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
-ENV PYTHONDONTWRITEBYTECODE=1
+# Prevent Python from writing pyc files and buffering stdout
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies (expand this if you use numpy, psycopg2, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
+    g++ \
+    make \
+    libffi-dev \
+    libssl-dev \
+    libpq-dev \
     curl \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
+# Set working directory
 WORKDIR /app
 
-# Copy requirements first for better caching
+# Copy requirements and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN python -m pip install --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
+# Copy the rest of the project
 COPY . .
 
-# Create templates directory
+# Ensure templates folder exists
 RUN mkdir -p templates
 
-# Set proper permissions
-RUN chmod +x /app
+# Expose port for web service
+EXPOSE 5000
 
-# Health check
+# Health check endpoint
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:5000/health || exit 1
 
-# Expose port
-EXPOSE 5000
-
-# Default command for web service
+# Run the app using gunicorn
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "app:app"]
