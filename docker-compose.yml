@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    container_name: jio-tv-web
+    ports:
+      - "5000:5000"
+    environment:
+      - M3U_URL=${M3U_URL}
+      - WEB_APP_URL=${WEB_APP_URL}
+      - PORT=5000
+    command: gunicorn --bind 0.0.0.0:5000 --workers 2 --threads 4 --timeout 120 --access-logfile - --error-logfile - app:app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  bot:
+    build: .
+    container_name: jio-tv-bot
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - ADMIN_IDS=${ADMIN_IDS}
+      - M3U_URL=${M3U_URL}
+      - WEB_APP_URL=${WEB_APP_URL}
+    command: python bot.py
+    restart: unless-stopped
+    depends_on:
+      - web
