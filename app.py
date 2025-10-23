@@ -1,11 +1,11 @@
 from flask import Flask, render_template, request, jsonify
 import os
-import requests
-import re
-import time
-from functools import lru_cache
-from urllib.parse import urljoin, urlparse
+import threading
 import logging
+from ipytv import playlist
+from ipytv.playlist import M3UPlaylist, IPTVAttr
+import httpx
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -25,205 +25,149 @@ class ChannelManager:
         self.categories = {}
         self.last_update = 0
         self.cache_duration = 3600  # 1 hour
+        self.loading = False
+        self.playlist_obj = None
         
     def get_channels(self):
         """Get cached channels"""
-        if time.time() - self.last_update > self.cache_duration:
-            logger.info("Cache expired, reloading channels")
-            if M3U_URL:
-                self.parse_m3u(M3U_URL)
         return self.channels.copy()
     
-    def fetch_m3u_content(self, url, max_retries=3):
-        """Fetch M3U content with retry logic and better error handling"""
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-            'Cache-Control': 'no-cache'
-        }
-        
-        for attempt in range(max_retries):
-            try:
-                logger.info(f"Fetching M3U from {url} (Attempt {attempt + 1}/{max_retries})")
-                
-                # Use session for better connection handling
-                session = requests.Session()
-                session.headers.update(headers)
-                
-                response = session.get(
-                    url, 
-                    timeout=30,
-                    allow_redirects=True,
-                    stream=False
-                )
-                
+    def fetch_m3u_with_httpx(self, url, timeout=20):
+        """Fetch M3U content using httpx (better than requests)"""
+        try:
+            logger.info(f"📡 Fetching M3U from: {url}")
+            
+            with httpx.Client(timeout=timeout, follow_redirects=True) as client:
+                response = client.get(url)
                 response.raise_for_status()
-                
-                # Check if response is actually M3U content
                 content = response.text
                 
                 if not content.strip():
-                    logger.error(f"Empty response from {url}")
-                    continue
+                    logger.error("❌ Empty response")
+                    return None
                 
-                # Check for valid M3U content
-                if not ('#EXTM3U' in content or '#EXTINF' in content or 'http' in content):
-                    logger.warning(f"Response doesn't look like M3U content")
-                    # Try to parse anyway, might be plain playlist
-                
-                logger.info(f"Successfully fetched {len(content)} bytes")
+                logger.info(f"✅ Fetched {len(content)} bytes")
                 return content
                 
-            except requests.exceptions.Timeout:
-                logger.error(f"Timeout fetching M3U (attempt {attempt + 1})")
-                time.sleep(2 ** attempt)  # Exponential backoff
-                
-            except requests.exceptions.ConnectionError as e:
-                logger.error(f"Connection error: {e} (attempt {attempt + 1})")
-                time.sleep(2 ** attempt)
-                
-            except requests.exceptions.HTTPError as e:
-                logger.error(f"HTTP error: {e.response.status_code} (attempt {attempt + 1})")
-                if e.response.status_code in [403, 401]:
-                    logger.error("Access forbidden - check if URL requires authentication")
-                break  # Don't retry on 4xx errors
-                
-            except Exception as e:
-                logger.error(f"Unexpected error fetching M3U: {type(e).__name__}: {e}")
-                time.sleep(2 ** attempt)
-        
-        return None
+        except httpx.TimeoutException:
+            logger.error(f"⏱️ Timeout after {timeout}s")
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ HTTP {e.response.status_code}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error: {type(e).__name__}: {e}")
+            return None
     
-    def parse_m3u(self, url):
-        """Parse M3U playlist with support for multiple formats"""
+    def parse_m3u_with_ipytv(self, url):
+        """Parse M3U using professional ipytv library"""
+        if self.loading:
+            logger.info("⏳ Already loading")
+            return False
+        
+        self.loading = True
+        
         try:
-            content = self.fetch_m3u_content(url)
+            # Fetch content
+            content = self.fetch_m3u_with_httpx(url)
             
             if not content:
-                logger.error("Failed to fetch M3U content")
+                logger.error("❌ Failed to fetch content")
                 return False
             
+            # Save to temporary file
+            temp_file = '/tmp/playlist.m3u'
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                f.write(content)
+            
+            # Load with ipytv - handles errors automatically
+            logger.info("🔄 Parsing with IPyTV...")
+            m3u_playlist = playlist.loadf(temp_file)
+            
+            if not m3u_playlist or len(m3u_playlist) == 0:
+                logger.error("❌ No channels found")
+                return False
+            
+            self.playlist_obj = m3u_playlist
+            
+            # Convert to our format
             channels = {}
             categories = {}
             
-            lines = content.split('\n')
-            current_channel = {}
-            line_count = 0
-            
-            for i, line in enumerate(lines):
-                line = line.strip()
+            for idx, channel in enumerate(m3u_playlist):
+                # Extract channel info
+                name = channel.name or f'Channel {idx + 1}'
+                logo = channel.attributes.get(IPTVAttr.TVG_LOGO.value, '')
+                category = channel.attributes.get(IPTVAttr.GROUP_TITLE.value, 'Uncategorized')
+                tvg_id = channel.attributes.get(IPTVAttr.TVG_ID.value, '')
+                url = channel.url or ''
                 
-                if not line or line.startswith('##'):
+                if not url:
                     continue
                 
-                # Handle #EXTINF lines
-                if line.startswith('#EXTINF:') or line.startswith('EXTINF:'):
-                    line_count += 1
-                    
-                    # Extract tvg-logo
-                    logo_match = re.search(r'tvg-logo="([^"]*)"', line)
-                    logo = logo_match.group(1) if logo_match else ''
-                    
-                    # Extract group-title (category)
-                    category_match = re.search(r'group-title="([^"]*)"', line)
-                    category = category_match.group(1) if category_match else 'Uncategorized'
-                    
-                    # Extract tvg-id
-                    tvg_id_match = re.search(r'tvg-id="([^"]*)"', line)
-                    tvg_id = tvg_id_match.group(1) if tvg_id_match else ''
-                    
-                    # Extract channel name (after last comma)
-                    name_match = re.search(r',(.+)$', line)
-                    if name_match:
-                        name = name_match.group(1).strip()
-                    else:
-                        # Fallback: use tvg-id or generate name
-                        name = tvg_id if tvg_id else f'Channel {line_count}'
-                    
-                    current_channel = {
-                        'name': name,
-                        'logo': logo,
-                        'category': category,
-                        'tvg_id': tvg_id,
-                        'url': ''
-                    }
+                channel_data = {
+                    'name': name,
+                    'logo': logo,
+                    'category': category,
+                    'tvg_id': tvg_id,
+                    'url': url
+                }
                 
-                # Handle stream URLs
-                elif line and not line.startswith('#') and current_channel:
-                    # This is the stream URL
-                    stream_url = line.strip()
-                    
-                    # Validate URL
-                    if stream_url.startswith(('http://', 'https://', 'rtmp://', 'rtsp://')):
-                        current_channel['url'] = stream_url
-                        
-                        # Add to categories
-                        if current_channel['category'] not in categories:
-                            categories[current_channel['category']] = []
-                        
-                        categories[current_channel['category']].append(current_channel.copy())
-                        
-                        # Add to channels dict
-                        channel_id = len(channels)
-                        channels[channel_id] = current_channel.copy()
-                        
-                        current_channel = {}
+                # Add to categories
+                if category not in categories:
+                    categories[category] = []
+                categories[category].append(channel_data.copy())
                 
-                # Handle plain URLs (no #EXTINF)
-                elif line.startswith(('http://', 'https://')) and not current_channel:
-                    line_count += 1
-                    # Create a basic channel entry
-                    channel = {
-                        'name': f'Channel {line_count}',
-                        'logo': '',
-                        'category': 'Uncategorized',
-                        'tvg_id': '',
-                        'url': line.strip()
-                    }
-                    
-                    if channel['category'] not in categories:
-                        categories[channel['category']] = []
-                    
-                    categories[channel['category']].append(channel.copy())
-                    
-                    channel_id = len(channels)
-                    channels[channel_id] = channel.copy()
+                # Add to channels dict
+                channel_id = len(channels)
+                channels[channel_id] = channel_data
             
             if channels:
                 self.channels = channels
                 self.categories = categories
                 self.last_update = time.time()
-                logger.info(f"Successfully parsed {len(channels)} channels in {len(categories)} categories")
                 
-                # Log category breakdown
-                for cat, ch_list in categories.items():
-                    logger.info(f"  - {cat}: {len(ch_list)} channels")
+                logger.info(f"✅ Parsed {len(channels)} channels in {len(categories)} categories")
+                
+                # Log top 5 categories
+                top_cats = sorted(categories.items(), key=lambda x: len(x[1]), reverse=True)[:5]
+                for cat, ch_list in top_cats:
+                    logger.info(f"  📂 {cat}: {len(ch_list)} channels")
                 
                 return True
             else:
-                logger.error("No channels found in M3U playlist")
+                logger.error("❌ No valid channels")
                 return False
                 
         except Exception as e:
-            logger.error(f"Error parsing M3U: {type(e).__name__}: {e}")
+            logger.error(f"❌ Parse error: {type(e).__name__}: {e}")
             import traceback
             logger.error(traceback.format_exc())
             return False
+        finally:
+            self.loading = False
 
 # Initialize channel manager
 channel_manager = ChannelManager()
 
-# Load channels on startup
-if M3U_URL:
-    logger.info(f"Loading channels from: {M3U_URL}")
-    if channel_manager.parse_m3u(M3U_URL):
-        logger.info("Channels loaded successfully on startup")
+# Load channels in background (non-blocking startup)
+def load_channels_async():
+    """Background M3U loader"""
+    if M3U_URL:
+        logger.info(f"🚀 Starting background M3U load")
+        time.sleep(2)  # Give Flask time to start
+        try:
+            if channel_manager.parse_m3u_with_ipytv(M3U_URL):
+                logger.info("✅ Channels loaded successfully")
+            else:
+                logger.warning("⚠️ Failed to load channels - service continues")
+        except Exception as e:
+            logger.error(f"❌ Background load error: {e}")
     else:
-        logger.error("Failed to load channels on startup")
-else:
-    logger.warning("No M3U_URL provided in environment variables")
+        logger.warning("⚠️ No M3U_URL configured")
+
+# Start background loading
+threading.Thread(target=load_channels_async, daemon=True).start()
 
 @app.route('/')
 def index():
@@ -287,7 +231,7 @@ def reload_playlist():
         if not url:
             return jsonify({'success': False, 'message': 'No URL provided'}), 400
         
-        if channel_manager.parse_m3u(url):
+        if channel_manager.parse_m3u_with_ipytv(url):
             return jsonify({
                 'success': True, 
                 'message': 'Playlist reloaded',
@@ -295,45 +239,46 @@ def reload_playlist():
                 'categories': len(channel_manager.categories)
             })
         else:
-            return jsonify({'success': False, 'message': 'Failed to parse playlist'}), 500
+            return jsonify({'success': False, 'message': 'Failed to parse'}), 500
     except Exception as e:
-        logger.error(f"Error reloading playlist: {e}")
+        logger.error(f"Reload error: {e}")
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/health')
 def health():
-    """Health check endpoint"""
-    channels = channel_manager.get_channels()
+    """Health check - always returns OK for Render"""
     return jsonify({
         'status': 'ok',
-        'channels': len(channels),
+        'channels': len(channel_manager.channels),
         'categories': len(channel_manager.categories),
         'last_update': channel_manager.last_update,
-        'm3u_url_configured': bool(M3U_URL)
+        'm3u_configured': bool(M3U_URL),
+        'loading': channel_manager.loading
     })
 
 @app.route('/api/test-m3u', methods=['POST'])
 def test_m3u():
-    """Test M3U URL without saving"""
+    """Test M3U URL"""
     try:
         data = request.get_json()
         url = data.get('url')
         
         if not url:
-            return jsonify({'success': False, 'message': 'No URL provided'}), 400
+            return jsonify({'success': False, 'message': 'No URL'}), 400
         
-        content = channel_manager.fetch_m3u_content(url)
+        content = channel_manager.fetch_m3u_with_httpx(url, timeout=15)
         
         if content:
-            lines = content.split('\n')[:20]  # First 20 lines
+            lines = content.split('\n')[:15]
             return jsonify({
                 'success': True,
-                'message': 'M3U URL is accessible',
+                'message': 'URL accessible',
                 'preview': '\n'.join(lines),
-                'size': len(content)
+                'size': len(content),
+                'lines': len(content.split('\n'))
             })
         else:
-            return jsonify({'success': False, 'message': 'Failed to fetch M3U'}), 500
+            return jsonify({'success': False, 'message': 'Failed to fetch'}), 500
             
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -351,5 +296,12 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('DEBUG', 'False').lower() == 'true'
     
-    logger.info(f"Starting Flask app on port {port}")
+    logger.info("=" * 60)
+    logger.info("🎬 JIO TV BOT - WEB SERVICE")
+    logger.info("=" * 60)
+    logger.info(f"🌐 Port: {port}")
+    logger.info(f"📡 M3U URL: {M3U_URL[:50] + '...' if M3U_URL and len(M3U_URL) > 50 else M3U_URL or 'Not configured'}")
+    logger.info(f"🔧 Debug: {debug}")
+    logger.info("=" * 60)
+    
     app.run(host='0.0.0.0', port=port, debug=debug)
