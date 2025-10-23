@@ -26,52 +26,42 @@
     async function initPlayer() {
       try {
         const ch = await fetchChannelData(channelId);
-        const video = document.getElementById('video');
+        if (!ch.link) throw new Error("Channel link missing");
 
-        // Initialize Shaka Player
+        const video = document.getElementById('video');
         const player = new shaka.Player(video);
 
-        // Attach error handler
-        player.addEventListener('error', e => console.error('Shaka error', e));
+        // Log Shaka errors
+        player.addEventListener('error', e => {
+          console.error('Shaka Player Error:', e.detail);
+          alert('Shaka Player Error: ' + e.detail?.message || 'Unknown error');
+        });
 
-        const config = {};
-
-        // If DRM is set
+        // Configure Clearkey DRM if present
         if (ch.drmScheme && ch.drmLicense) {
-          config.drm = {
-            servers: {
-              [ch.drmScheme]: ch.drmLicense
-            },
-            advanced: {
-              [ch.drmScheme]: {
-                'serverCertificate': null
+          player.configure({
+            drm: {
+              servers: { [ch.drmScheme]: ch.drmLicense },
+              advanced: {
+                [ch.drmScheme]: {
+                  headers: ch.cookie ? { 'Cookie': ch.cookie } : {}
+                }
               }
             }
-          };
+          });
         }
 
-        // If cookie is set, use license request headers
-        if (ch.cookie) {
-          config.drm = config.drm || {};
-          config.drm.advanced = config.drm.advanced || {};
-          config.drm.advanced[ch.drmScheme || 'com.widevine.alpha'] = {
-            headers: {
-              'Cookie': ch.cookie
-            }
-          };
-        }
+        console.log("Loading video:", ch.link);
+        await player.load(ch.link);  // Load the DASH stream
+        console.log("✅ Video loaded:", ch.name);
 
-        player.configure(config);
-
-        // Load the video
-        await player.load(ch.link);
-        console.log('Video loaded:', ch.name);
       } catch (err) {
-        console.error(err);
+        console.error("Player init error:", err);
         document.body.innerHTML = `<p style="color:white;text-align:center;">❌ Failed to load video: ${err.message}</p>`;
       }
     }
 
+    // Initialize player
     initPlayer();
   </script>
 </body>
