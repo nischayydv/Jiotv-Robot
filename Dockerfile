@@ -14,15 +14,17 @@ COPY requirements.txt .
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application files
+# Copy main bot and templates
 COPY bot.py .
 COPY templates/ ./templates/
-COPY static/ ./static/
 
-# Create static directory if it doesn't exist
+# Create static directory (in case it's missing)
 RUN mkdir -p static
 
-# Set environment variables
+# If you have a static folder later, uncomment below
+# COPY static/ ./static/
+
+# Environment configuration
 ENV PYTHONUNBUFFERED=1
 ENV PORT=5000
 
