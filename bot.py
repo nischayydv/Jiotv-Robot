@@ -3,14 +3,15 @@ import re
 import json
 import logging
 import asyncio
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, Response
 from flask_cors import CORS
 from threading import Thread
 import aiohttp
+import requests
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import ConnectionFailure
 import hashlib
@@ -42,7 +43,7 @@ try:
     channels_col = db['channels']
     categories_col = db['categories']
     stats_col = db['stats']
-    sources_col = db['sources']  # Track processed URLs/files
+    sources_col = db['sources']
     
     # Create indexes
     channels_col.create_index([('id', ASCENDING)], unique=True)
@@ -71,7 +72,7 @@ if GEMINI_API_KEY:
     except Exception as e:
         logger.warning(f"⚠️ Gemini not available: {e}")
 
-# In-memory cache (fallback if MongoDB unavailable)
+# In-memory cache
 channels_cache = {}
 categories_cache = {}
 bot_stats = {
@@ -214,6 +215,114 @@ def player():
     update_stats('plays', 1)
     return render_template('player.html', channel=channel)
 
+@app.route('/proxy/<channel_id>')
+def proxy_manifest(channel_id):
+    """Proxy DASH manifest with cookies"""
+    try:
+        channel = get_channel(channel_id)
+        if not channel:
+            return jsonify({'error': 'Channel not found'}), 404
+        
+        manifest_url = channel.get('link', '')
+        cookie = channel.get('cookie', '')
+        
+        if not manifest_url:
+            return jsonify({'error': 'No manifest URL'}), 400
+        
+        # Prepare headers
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.jiocinema.com/',
+            'Origin': 'https://www.jiocinema.com'
+        }
+        
+        if cookie:
+            headers['Cookie'] = cookie
+        
+        # Fetch manifest
+        logger.info(f"Proxying manifest: {manifest_url}")
+        response = requests.get(manifest_url, headers=headers, timeout=10)
+        
+        if response.status_code != 200:
+            logger.error(f"Failed to fetch manifest: {response.status_code}")
+            return jsonify({'error': f'Manifest fetch failed: {response.status_code}'}), 502
+        
+        # Modify manifest to use proxy for segments
+        content = response.text
+        
+        # Get base URL from manifest
+        from urllib.parse import urlparse, urljoin
+        parsed = urlparse(manifest_url)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        manifest_base = manifest_url.rsplit('/', 1)[0] + '/'
+        
+        # Replace relative URLs with proxied URLs
+        content = content.replace('BaseURL>', f'BaseURL>{WEBAPP_URL}/proxy-segment/{channel_id}/')
+        
+        return Response(
+            content,
+            mimetype='application/dash+xml',
+            headers={
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type',
+                'Cache-Control': 'no-cache'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Proxy error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/proxy-segment/<channel_id>/<path:segment_path>')
+def proxy_segment(channel_id, segment_path):
+    """Proxy video segments with cookies"""
+    try:
+        channel = get_channel(channel_id)
+        if not channel:
+            return jsonify({'error': 'Channel not found'}), 404
+        
+        manifest_url = channel.get('link', '')
+        cookie = channel.get('cookie', '')
+        
+        # Construct full segment URL
+        manifest_base = manifest_url.rsplit('/', 1)[0] + '/'
+        segment_url = urljoin(manifest_base, segment_path)
+        
+        # Prepare headers
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.jiocinema.com/',
+            'Origin': 'https://www.jiocinema.com'
+        }
+        
+        if cookie:
+            headers['Cookie'] = cookie
+        
+        # Fetch segment
+        response = requests.get(segment_url, headers=headers, stream=True, timeout=10)
+        
+        if response.status_code != 200:
+            logger.error(f"Segment fetch failed: {response.status_code}")
+            return jsonify({'error': 'Segment fetch failed'}), 502
+        
+        # Stream response
+        return Response(
+            response.iter_content(chunk_size=8192),
+            mimetype=response.headers.get('Content-Type', 'video/mp4'),
+            headers={
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Access-Control-Allow-Headers': 'Range, Content-Type',
+                'Access-Control-Expose-Headers': 'Content-Length, Content-Range',
+                'Cache-Control': 'public, max-age=3600'
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Segment proxy error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/channels')
 def api_channels():
     """API endpoint for all channels"""
@@ -345,7 +454,6 @@ def categorize_basic(name):
 def parse_json_channels(content, source_info="unknown"):
     """Parse JSON format channels with duplicate checking"""
     
-    # Check if already processed
     if check_source_processed(content):
         logger.info("⏭️ Source already processed, skipping...")
         return True
@@ -362,7 +470,6 @@ def parse_json_channels(content, source_info="unknown"):
             logger.error("Invalid JSON format")
             return False
         
-        # Process channels
         for idx, ch in enumerate(channels_list):
             cid = ch.get('id', f"ch_{idx}")
             
@@ -381,7 +488,6 @@ def parse_json_channels(content, source_info="unknown"):
             
             save_channel(channel_data)
         
-        # Mark as processed
         mark_source_processed(content, source_info)
         
         logger.info(f"✅ Loaded {len(channels_list)} channels")
@@ -413,7 +519,7 @@ async def auto_categorize_all():
             logger.info(f"[{idx}/{len(uncategorized)}] {ch['name']} → {category}")
             
             if gemini_model:
-                await asyncio.sleep(1)  # Rate limit for Gemini
+                await asyncio.sleep(1)
         except Exception as e:
             logger.error(f"Categorization error: {e}")
             ch['category'] = 'Other'
@@ -449,14 +555,12 @@ def create_pagination_keyboard(items, page, per_page, callback_prefix, back_call
     
     keyboard = []
     
-    # Create 2 rows of 4 buttons each
     for i in range(0, len(current_items), 4):
         row = []
         for item in current_items[i:i+4]:
             row.append(item)
         keyboard.append(row)
     
-    # Navigation buttons
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"{callback_prefix}_page_{page-1}"))
@@ -469,7 +573,6 @@ def create_pagination_keyboard(items, page, per_page, callback_prefix, back_call
     if nav_buttons:
         keyboard.append(nav_buttons)
     
-    # Back button
     keyboard.append([InlineKeyboardButton("🏠 Main Menu", callback_data=back_callback)])
     
     return keyboard
@@ -488,7 +591,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     categories = get_categories()
     categories_list = sorted(categories.keys())
     
-    # Create category buttons with counts
     cat_buttons = []
     for cat in categories_list:
         cat_buttons.append(InlineKeyboardButton(
@@ -504,7 +606,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "start"
     )
     
-    # Add search button before pagination
     keyboard.insert(-1, [InlineKeyboardButton("🔍 Search Channels", switch_inline_query_current_chat="")])
     
     if is_admin(user.id):
@@ -561,7 +662,6 @@ async def categories_page_handler(update: Update, context: ContextTypes.DEFAULT_
         "start"
     )
     
-    # Add search button before pagination
     keyboard.insert(-1, [InlineKeyboardButton("🔍 Search Channels", switch_inline_query_current_chat="")])
     
     if is_admin(query.from_user.id):
@@ -588,7 +688,6 @@ async def category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    # Parse: cat_CategoryName_page
     parts = query.data.split('_')
     page = int(parts[-1])
     cat = '_'.join(parts[1:-1])
@@ -599,7 +698,6 @@ async def category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("No channels in this category!", show_alert=True)
         return
     
-    # Create channel buttons
     channel_buttons = []
     for ch in channels:
         channel_buttons.append(InlineKeyboardButton(
@@ -645,7 +743,6 @@ async def play_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     player_url = f"{WEBAPP_URL}/player?id={cid}"
     
-    # Only use WebApp for Mini Player
     keyboard = [
         [InlineKeyboardButton("🎬 Watch Now", web_app=WebAppInfo(url=player_url))],
         [InlineKeyboardButton("🔙 Back", callback_data=f"cat_{ch.get('category', 'Other')}_0")],
