@@ -259,35 +259,127 @@
         #debug-info {
             position: absolute;
             top: 80px;
-            left: 10px;
-            background: rgba(0,0,0,0.8);
-            padding: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.95);
+            padding: 12px 15px;
             font-size: 11px;
-            border-radius: 5px;
-            max-width: 300px;
+            border-radius: 8px;
+            max-width: 400px;
             word-wrap: break-word;
-            display: none;
+            z-index: 50;
+            font-family: 'Courier New', monospace;
+            line-height: 1.6;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        #debug-info::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #debug-info::-webkit-scrollbar-track {
+            background: rgba(255,255,255,0.1);
+            border-radius: 3px;
+        }
+
+        #debug-info::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.3);
+            border-radius: 3px;
+        }
+
+        .debug-line {
+            margin: 3px 0;
+            padding: 2px 0;
+        }
+
+        .debug-success {
+            color: #00ff00;
+        }
+
+        .debug-error {
+            color: #ff4444;
+            font-weight: bold;
+        }
+
+        .debug-info {
+            color: #00d4ff;
+        }
+
+        .debug-warning {
+            color: #ffaa00;
+        }
+
+        .debug-header {
+            color: #fff;
+            font-weight: bold;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+            padding-bottom: 5px;
+            margin-bottom: 5px;
         }
 
         /* Mobile adjustments */
         @media (max-width: 768px) {
-            #header { padding: 10px 15px; }
-            #channel-logo { width: 40px; height: 40px; }
-            #channel-details h1 { font-size: 16px; }
-            #channel-details p { font-size: 12px; }
-            #controls { padding: 15px; }
-            #control-buttons { flex-wrap: wrap; }
-            .btn-group { flex: 1; justify-content: center; }
-            button { padding: 8px 12px; font-size: 12px; }
-            #play-pause { font-size: 20px; padding: 8px 16px; }
+            #header {
+                padding: 10px 15px;
+            }
+
+            #channel-logo {
+                width: 40px;
+                height: 40px;
+            }
+
+            #channel-details h1 {
+                font-size: 16px;
+            }
+
+            #channel-details p {
+                font-size: 12px;
+            }
+
+            #controls {
+                padding: 15px;
+            }
+
+            #control-buttons {
+                flex-wrap: wrap;
+            }
+
+            .btn-group {
+                flex: 1;
+                justify-content: center;
+            }
+
+            button {
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+
+            #play-pause {
+                font-size: 20px;
+                padding: 8px 16px;
+            }
+
+            #debug-info {
+                font-size: 9px;
+                max-width: 250px;
+                max-height: 250px;
+                top: 60px;
+                right: 5px;
+                padding: 8px 10px;
+            }
         }
     </style>
 </head>
 <body>
     <div id="container">
+        <!-- Header with channel info -->
         <div id="header">
             <div id="channel-info">
-                <img id="channel-logo" src="" alt="Logo" onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22%3E%3Crect fill=%22%23333%22 width=%2250%22 height=%2250%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23fff%22 font-size=%2220%22%3ETV%3C/text%3E%3C/svg%3E'">
+                <img id="channel-logo" 
+                     src="" 
+                     alt="Logo" 
+                     onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22%3E%3Crect fill=%22%23333%22 width=%2250%22 height=%2250%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23fff%22 font-size=%2220%22%3ETV%3C/text%3E%3C/svg%3E'">
                 <div id="channel-details">
                     <h1 id="channel-name">Loading...</h1>
                     <p><span class="live-badge">🔴 LIVE</span></p>
@@ -295,14 +387,17 @@
             </div>
         </div>
 
+        <!-- Video container -->
         <div id="video-container">
             <video id="video" playsinline></video>
             
+            <!-- Loading spinner -->
             <div id="loading">
                 <div class="spinner"></div>
                 <p>Loading stream...</p>
             </div>
 
+            <!-- Error message -->
             <div id="error">
                 <h2>⚠️ Playback Error</h2>
                 <p id="error-message">Unable to load the stream</p>
@@ -310,6 +405,7 @@
             </div>
         </div>
 
+        <!-- Player controls -->
         <div id="controls">
             <div id="progress-container">
                 <div id="progress-bar"></div>
@@ -329,13 +425,16 @@
             </div>
         </div>
 
+        <!-- Debug panel -->
         <div id="debug-info"></div>
     </div>
 
     <script>
+        // Get channel ID from URL
         const urlParams = new URLSearchParams(window.location.search);
         const channelId = urlParams.get('id');
 
+        // DOM elements
         const video = document.getElementById('video');
         const loading = document.getElementById('loading');
         const errorDiv = document.getElementById('error');
@@ -348,18 +447,23 @@
         const qualitySelector = document.getElementById('quality-selector');
         const debugInfo = document.getElementById('debug-info');
 
+        // Global variables
         let player;
         let hideControlsTimeout;
         let channelData;
 
-        // Debug logging
-        function debug(msg) {
+        // Debug logging with colors
+        function debug(msg, type = 'info') {
             console.log('[Player]', msg);
-            debugInfo.innerHTML += msg + '<br>';
-            debugInfo.style.display = 'block';
+            const line = document.createElement('div');
+            line.className = `debug-line debug-${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            line.textContent = `[${timestamp}] ${msg}`;
+            debugInfo.appendChild(line);
+            debugInfo.scrollTop = debugInfo.scrollHeight;
         }
 
-        // Hex to Base64 conversion for ClearKey
+        // Hex to Base64 conversion for ClearKey DRM
         function hexToBase64(hexString) {
             const hex = hexString.replace(/\s/g, '');
             const bytes = [];
@@ -369,20 +473,52 @@
             return btoa(String.fromCharCode.apply(null, bytes));
         }
 
-        // Fetch channel data
+        // Custom network request filter to inject cookies
+        class CookieRequestFilter {
+            constructor(cookie) {
+                this.cookie = cookie;
+            }
+
+            request(type, request) {
+                // Add cookie to all network requests
+                if (this.cookie) {
+                    request.headers['Cookie'] = this.cookie;
+                }
+                
+                // Add required headers for JioCinema CDN
+                request.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+                request.headers['Origin'] = 'https://www.jiocinema.com';
+                request.headers['Referer'] = 'https://www.jiocinema.com/';
+                request.headers['Accept'] = '*/*';
+            }
+        }
+
+        // Fetch channel data from API
         async function loadChannel() {
             try {
-                debug(`Fetching channel: ${channelId}`);
+                debug('=== PLAYER INITIALIZING ===', 'header');
+                debug(`Fetching channel data: ${channelId}`, 'info');
+                
                 const response = await fetch(`/api/channel/${channelId}`);
                 
                 if (!response.ok) {
-                    throw new Error('Channel not found');
+                    throw new Error(`Channel not found (HTTP ${response.status})`);
                 }
                 
                 channelData = await response.json();
-                debug(`Channel loaded: ${channelData.name}`);
-                debug(`DRM: ${channelData.drmScheme}`);
-                debug(`Cookie: ${channelData.cookie ? 'Present' : 'None'}`);
+                
+                debug(`✓ Channel loaded: ${channelData.name}`, 'success');
+                debug(`Category: ${channelData.category}`, 'info');
+                debug(`DRM Scheme: ${channelData.drmScheme || 'None'}`, 'info');
+                
+                if (channelData.cookie) {
+                    const cookiePreview = channelData.cookie.substring(0, 50);
+                    debug(`✓ Cookie present: ${cookiePreview}...`, 'success');
+                } else {
+                    debug(`✗ No cookie found!`, 'warning');
+                }
+                
+                debug(`Manifest URL: ${channelData.link}`, 'info');
                 
                 // Update UI
                 document.getElementById('channel-name').textContent = channelData.name;
@@ -391,8 +527,9 @@
                 
                 // Initialize player
                 await initPlayer();
+                
             } catch (err) {
-                debug(`Error loading channel: ${err.message}`);
+                debug(`✗✗✗ ERROR loading channel: ${err.message}`, 'error');
                 showError('Failed to load channel: ' + err.message);
             }
         }
@@ -400,16 +537,28 @@
         // Initialize Shaka Player
         async function initPlayer() {
             try {
-                debug('Checking browser support...');
+                debug('--- SHAKA PLAYER SETUP ---', 'header');
+                debug('Checking browser support...', 'info');
                 
                 if (!shaka.Player.isBrowserSupported()) {
-                    throw new Error('Browser not supported');
+                    throw new Error('Browser not supported for DASH playback');
                 }
+                debug('✓ Browser is supported', 'success');
 
-                debug('Creating Shaka Player...');
+                debug('Creating Shaka Player instance...', 'info');
                 player = new shaka.Player(video);
+                debug('✓ Player instance created', 'success');
 
-                // Configure player for DASH with buffering
+                // Register network filter for cookies
+                debug('Registering cookie filter...', 'info');
+                const cookieFilter = new CookieRequestFilter(channelData.cookie);
+                player.getNetworkingEngine().registerRequestFilter(
+                    cookieFilter.request.bind(cookieFilter)
+                );
+                debug('✓ Cookie filter registered (will inject into all requests)', 'success');
+
+                // Configure player with optimized settings
+                debug('Configuring player settings...', 'info');
                 player.configure({
                     streaming: {
                         bufferingGoal: 30,
@@ -422,70 +571,99 @@
                             fuzzFactor: 0.5,
                             timeout: 30000
                         }
+                    },
+                    manifest: {
+                        retryParameters: {
+                            maxAttempts: 5,
+                            baseDelay: 1000,
+                            backoffFactor: 2,
+                            timeout: 30000
+                        }
                     }
                 });
+                debug('✓ Player configured', 'success');
 
                 // Setup DRM if needed
                 if (channelData.drmScheme && channelData.drmLicense) {
-                    debug('Setting up DRM...');
+                    debug('--- DRM SETUP ---', 'header');
                     setupDRM();
                 }
 
                 // Error handling
                 player.addEventListener('error', onPlayerError);
 
-                // Use proxied manifest URL
-                const manifestUrl = `/proxy/${channelId}`;
-                debug(`Loading manifest: ${manifestUrl}`);
+                // Load manifest (DIRECT URL from API - no proxy)
+                const manifestUrl = channelData.link;
+                debug('--- LOADING MANIFEST ---', 'header');
+                debug(`URL: ${manifestUrl}`, 'info');
+                debug('Loading manifest...', 'info');
 
                 await player.load(manifestUrl);
-                debug('Manifest loaded successfully');
+                
+                debug('✓✓✓ Manifest loaded successfully!', 'success');
                 
                 // Setup quality selector
                 setupQualitySelector();
 
-                // Hide loading, start playback
+                // Hide loading spinner
                 loading.classList.add('hidden');
                 
-                debug('Starting playback...');
+                // Start playback
+                debug('--- STARTING PLAYBACK ---', 'header');
+                debug('Attempting to play video...', 'info');
+                
                 await video.play();
                 playPauseBtn.textContent = '⏸️';
 
-                debug('✅ Playback started');
+                debug('✓✓✓ PLAYBACK STARTED SUCCESSFULLY!', 'success');
+                debug('=== PLAYER READY ===', 'header');
                 
-                // Hide debug after 5 seconds if successful
+                // Hide debug panel after 10 seconds
                 setTimeout(() => {
                     debugInfo.style.display = 'none';
-                }, 5000);
+                }, 10000);
 
             } catch (err) {
-                debug(`❌ Player error: ${err.message}`);
+                debug('--- CRITICAL ERROR ---', 'header');
+                debug(`✗✗✗ Player initialization failed: ${err.message}`, 'error');
+                
+                if (err.code) {
+                    debug(`Error code: ${err.code}`, 'error');
+                }
+                
+                if (err.data) {
+                    debug(`Error details: ${JSON.stringify(err.data)}`, 'error');
+                }
+                
                 showError('Playback failed: ' + err.message);
-                console.error('Player error:', err);
+                console.error('Full error:', err);
             }
         }
 
         // Setup DRM (ClearKey)
         function setupDRM() {
             if (channelData.drmScheme.toLowerCase() === 'clearkey') {
-                // Parse format: "keyHex:kidHex"
+                debug('DRM Type: ClearKey', 'info');
+                
+                // Parse license format: "keyHex:kidHex"
                 const parts = channelData.drmLicense.split(':');
                 
                 if (parts.length !== 2) {
-                    debug('Invalid ClearKey format');
+                    debug('✗ Invalid ClearKey format (expected key:kid)', 'error');
                     return;
                 }
 
                 const [keyHex, kidHex] = parts;
-                debug(`Key: ${keyHex.substring(0, 8)}...`);
-                debug(`KID: ${kidHex.substring(0, 8)}...`);
+                debug(`Key (hex): ${keyHex.substring(0, 16)}...`, 'info');
+                debug(`KID (hex): ${kidHex.substring(0, 16)}...`, 'info');
 
                 try {
                     // Convert hex to base64
                     const keyBase64 = hexToBase64(keyHex);
                     const kidBase64 = hexToBase64(kidHex);
-
-                    debug('Setting ClearKey...');
+                    
+                    debug(`Key (base64): ${keyBase64.substring(0, 16)}...`, 'info');
+                    debug(`KID (base64): ${kidBase64.substring(0, 16)}...`, 'info');
 
                     // Configure ClearKey DRM
                     player.configure({
@@ -496,20 +674,24 @@
                         }
                     });
 
-                    debug('✅ ClearKey configured');
+                    debug('✓ ClearKey DRM configured successfully', 'success');
+                    
                 } catch (e) {
-                    debug(`ClearKey error: ${e.message}`);
+                    debug(`✗ ClearKey setup error: ${e.message}`, 'error');
                 }
+            } else {
+                debug(`Unsupported DRM: ${channelData.drmScheme}`, 'warning');
             }
         }
 
         // Setup quality selector
         function setupQualitySelector() {
             const tracks = player.getVariantTracks();
-            debug(`Found ${tracks.length} quality tracks`);
+            debug(`Found ${tracks.length} quality tracks`, 'info');
             
             qualitySelector.innerHTML = '<option value="auto">Auto</option>';
             
+            // Get unique quality heights
             const qualities = new Set();
             tracks.forEach(track => {
                 if (track.height) {
@@ -517,30 +699,33 @@
                 }
             });
             
+            // Add quality options
             Array.from(qualities).sort((a, b) => b - a).forEach(height => {
                 const option = document.createElement('option');
                 option.value = height;
                 option.textContent = `${height}p`;
                 qualitySelector.appendChild(option);
+                debug(`Quality available: ${height}p`, 'info');
             });
             
+            // Quality change handler
             qualitySelector.addEventListener('change', (e) => {
                 if (e.target.value === 'auto') {
                     player.configure({abr: {enabled: true}});
-                    debug('Auto quality enabled');
+                    debug('✓ Auto quality enabled', 'success');
                 } else {
                     player.configure({abr: {enabled: false}});
                     const targetHeight = parseInt(e.target.value);
                     const track = tracks.find(t => t.height === targetHeight);
                     if (track) {
                         player.selectVariantTrack(track);
-                        debug(`Quality set to ${targetHeight}p`);
+                        debug(`✓ Quality changed to ${targetHeight}p`, 'success');
                     }
                 }
             });
         }
 
-        // Show error
+        // Show error message
         function showError(message) {
             loading.classList.add('hidden');
             errorMessage.textContent = message;
@@ -550,38 +735,54 @@
         // Player error handler
         function onPlayerError(event) {
             const error = event.detail;
-            console.error('Player error:', error);
-            debug(`Error: ${error.message}`);
+            console.error('Shaka Player Error:', error);
+            
+            debug('--- PLAYBACK ERROR ---', 'header');
+            debug(`✗ Error code: ${error.code}`, 'error');
+            debug(`✗ Message: ${error.message}`, 'error');
+            
+            if (error.data) {
+                debug(`✗ Additional data: ${JSON.stringify(error.data)}`, 'error');
+            }
+            
             showError(error.message || 'Playback error occurred');
         }
 
-        // Control handlers
+        // ===== PLAYER CONTROLS =====
+
+        // Play/Pause button
         playPauseBtn.addEventListener('click', () => {
             if (video.paused) {
                 video.play();
                 playPauseBtn.textContent = '⏸️';
+                debug('▶ Resumed playback', 'info');
             } else {
                 video.pause();
                 playPauseBtn.textContent = '▶️';
+                debug('⏸ Paused playback', 'info');
             }
         });
 
+        // Mute button
         muteBtn.addEventListener('click', () => {
             video.muted = !video.muted;
             muteBtn.textContent = video.muted ? '🔇' : '🔊';
+            debug(video.muted ? '🔇 Muted' : '🔊 Unmuted', 'info');
         });
 
+        // Fullscreen button
         fullscreenBtn.addEventListener('click', () => {
             if (!document.fullscreenElement) {
                 document.getElementById('container').requestFullscreen().catch(err => {
-                    debug(`Fullscreen error: ${err.message}`);
+                    debug(`✗ Fullscreen error: ${err.message}`, 'error');
                 });
             } else {
                 document.exitFullscreen();
             }
         });
 
-        // Hide/show controls on user activity
+        // ===== AUTO-HIDE CONTROLS =====
+
         function resetHideControlsTimer() {
             clearTimeout(hideControlsTimeout);
             header.classList.remove('hidden');
@@ -599,33 +800,52 @@
         document.getElementById('container').addEventListener('touchstart', resetHideControlsTimer);
         document.getElementById('container').addEventListener('click', resetHideControlsTimer);
 
-        // Video event listeners
+        // ===== VIDEO EVENT LISTENERS =====
+
         video.addEventListener('playing', () => {
-            debug('Video playing');
+            debug('▶ Video is playing', 'success');
         });
 
         video.addEventListener('waiting', () => {
-            debug('Buffering...');
+            debug('⏳ Buffering...', 'warning');
+        });
+
+        video.addEventListener('pause', () => {
+            debug('⏸ Video paused', 'info');
         });
 
         video.addEventListener('error', (e) => {
-            debug(`Video error: ${e.message}`);
+            debug(`✗ Video element error: ${e.message}`, 'error');
         });
 
-        // Start loading
+        video.addEventListener('loadedmetadata', () => {
+            debug('✓ Video metadata loaded', 'success');
+        });
+
+        // ===== START PLAYER =====
+
         if (channelId) {
-            debug('Initializing player...');
             loadChannel();
         } else {
+            debug('✗✗✗ No channel ID provided in URL', 'error');
             showError('No channel ID provided');
         }
 
-        // Cleanup on page unload
+        // ===== CLEANUP =====
+
         window.addEventListener('beforeunload', () => {
             if (player) {
+                debug('Destroying player...', 'info');
                 player.destroy();
+            }
+        });
+
+        // Toggle debug panel on double-click
+        document.getElementById('container').addEventListener('dblclick', (e) => {
+            if (e.target === video || e.target === document.getElementById('video-container')) {
+                debugInfo.style.display = debugInfo.style.display === 'none' ? 'block' : 'none';
             }
         });
     </script>
 </body>
-</html>
+</html>        #channel
