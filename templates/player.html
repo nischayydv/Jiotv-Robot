@@ -338,7 +338,7 @@
             id: '{{ channel.id }}',
             name: '{{ channel.name }}',
             link: '{{ channel.link }}',
-            streamType: '{{ channel.stream_type|default("dash") }}',
+            streamType: '{{ channel.stream_type|default("hls") }}',
             drmScheme: '{{ channel.drmScheme|default("") }}',
             drmLicense: '{{ channel.drmLicense|default("") }}',
             cookie: '{{ channel.cookie|default("") }}',
@@ -402,13 +402,94 @@
             }
         }
         
+        async function fetchServerTVHubStream(url) {
+            /**
+             * Fetch the actual stream URL from servertvhub.site PHP endpoints
+             * These URLs like /jio/app/live.php?id=144 return JSON with stream info
+             */
+            try {
+                console.log('🔍 Fetching servertvhub stream info:', url);
+                
+                // Fetch through our proxy to avoid CORS
+                const proxyUrl = `${webappUrl}/api/fetch-stream?url=${encodeURIComponent(url)}`;
+                const response = await fetch(proxyUrl);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('✅ Stream info received:', data);
+                
+                // Extract stream URL from various possible formats
+                let streamUrl = null;
+                
+                if (data.streamUrl || data.stream_url || data.url) {
+                    streamUrl = data.streamUrl || data.stream_url || data.url;
+                } else if (data.mpd) {
+                    streamUrl = data.mpd;
+                } else if (data.m3u8) {
+                    streamUrl = data.m3u8;
+                } else if (data.result && typeof data.result === 'string') {
+                    streamUrl = data.result;
+                } else if (typeof data === 'string' && (data.includes('.m3u8') || data.includes('.mpd'))) {
+                    streamUrl = data;
+                }
+                
+                if (!streamUrl) {
+                    console.error('❌ No stream URL found in response:', data);
+                    throw new Error('Could not extract stream URL from response');
+                }
+                
+                console.log('📺 Extracted stream URL:', streamUrl);
+                
+                // Also extract DRM info if present
+                const streamInfo = {
+                    url: streamUrl,
+                    drm: data.drm || data.drmScheme || null,
+                    license: data.license || data.drmLicense || null,
+                    cookie: data.cookie || null
+                };
+                
+                return streamInfo;
+                
+            } catch (error) {
+                console.error('❌ Failed to fetch servertvhub stream:', error);
+                throw error;
+            }
+        }
+        
         async function initPlayer() {
             videoElement = document.getElementById('video-player');
             
             let streamUrl = channelData.link;
+            let streamInfo = null;
+            
+            // Check if this is a servertvhub PHP endpoint
+            if (streamUrl.includes('servertvhub.site') && streamUrl.includes('.php')) {
+                console.log('🔍 Detected servertvhub PHP endpoint');
+                try {
+                    streamInfo = await fetchServerTVHubStream(streamUrl);
+                    streamUrl = streamInfo.url;
+                    
+                    // Update DRM info if provided
+                    if (streamInfo.drm) {
+                        channelData.drmScheme = streamInfo.drm;
+                    }
+                    if (streamInfo.license) {
+                        channelData.drmLicense = streamInfo.license;
+                    }
+                    if (streamInfo.cookie) {
+                        channelData.cookie = streamInfo.cookie;
+                    }
+                } catch (error) {
+                    showError('Failed to fetch stream information: ' + error.message);
+                    return;
+                }
+            }
             
             // Use proxy if needed
-            if (channelData.needsProxy) {
+            if (channelData.needsProxy && !streamUrl.includes(webappUrl)) {
                 streamUrl = `${webappUrl}/proxy/${channelData.id}`;
             }
             
@@ -419,9 +500,12 @@
                 if (channelData.streamType === 'hls' || streamUrl.includes('.m3u8')) {
                     // Use HLS.js for HLS streams
                     await initHLSPlayer(streamUrl);
-                } else {
+                } else if (streamUrl.includes('.mpd') || channelData.drmScheme) {
                     // Use Shaka Player for DASH streams
                     await initShakaPlayer(streamUrl);
+                } else {
+                    // Auto-detect based on URL
+                    await initHLSPlayer(streamUrl);
                 }
             } catch (error) {
                 console.error('Player initialization error:', error);
