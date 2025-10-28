@@ -143,7 +143,10 @@ def get_channels_by_category(category):
     return [channels_cache.get(cid) for cid in cats.get(category, []) if cid in channels_cache]
 
 def check_source_processed(content):
-    """Check if this source was already processed"""
+    """Check if this source was already processed - DISABLED for testing"""
+    # Temporarily disable duplicate checking to allow re-importing
+    return False
+    
     if not MONGO_ENABLED:
         return False
     
@@ -549,11 +552,25 @@ def categorize_basic(name):
 # ============= DATA PARSING =============
 
 def parse_json_channels(content, source_info="unknown"):
-    """Parse JSON format channels"""
+    """Parse JSON format channels with better duplicate handling"""
     
-    if check_source_processed(content):
-        logger.info("⏭️ Source already processed, skipping...")
-        return True
+    # Skip empty content
+    if not content or len(content.strip()) < 10:
+        logger.error("❌ Content is empty or too short")
+        return False
+    
+    # Check if processed recently (10 minutes only)
+    content_hash = hashlib.md5(content.encode()).hexdigest()
+    
+    if MONGO_ENABLED:
+        ten_mins_ago = datetime.now() - timedelta(minutes=10)
+        recent = sources_col.find_one({
+            'hash': content_hash,
+            'processed_at': {'$gte': ten_mins_ago}
+        })
+        if recent:
+            logger.info(f"⏭️ Same source processed {(datetime.now() - recent['processed_at']).seconds} seconds ago")
+            return True
     
     try:
         data = json.loads(content) if isinstance(content, str) else content
@@ -564,54 +581,110 @@ def parse_json_channels(content, source_info="unknown"):
         elif isinstance(data, dict) and 'channels' in data:
             channels_list = data['channels']
         else:
-            logger.error("Invalid JSON format")
+            logger.error("❌ Invalid JSON format - expected array or object with 'channels' key")
             return False
         
+        logger.info(f"✅ Found {len(channels_list)} channels in JSON")
+        
+        saved_count = 0
+        updated_count = 0
+        error_count = 0
+        
         for idx, ch in enumerate(channels_list):
-            cid = ch.get('id', f"ch_{idx}")
-            
-            channel_data = {
-                'id': cid,
-                'name': ch.get('name', 'Unknown'),
-                'link': ch.get('link', ch.get('url', '')),
-                'logo': ch.get('logo', ''),
-                'drmScheme': ch.get('drmScheme', ''),
-                'drmLicense': ch.get('drmLicense', ''),
-                'cookie': ch.get('cookie', ''),
-                'category': ch.get('category'),
-                'stream_type': ch.get('stream_type', 'dash'),
-                'updated_at': datetime.now().isoformat(),
-                'needs_category': not ch.get('category')
-            }
-            
-            save_channel(channel_data)
+            try:
+                cid = ch.get('id', f"ch_{idx}_{hashlib.md5(ch.get('name', 'unknown').encode()).hexdigest()[:8]}")
+                
+                channel_data = {
+                    'id': cid,
+                    'name': ch.get('name', 'Unknown'),
+                    'link': ch.get('link', ch.get('url', '')),
+                    'logo': ch.get('logo', ''),
+                    'drmScheme': ch.get('drmScheme', ''),
+                    'drmLicense': ch.get('drmLicense', ''),
+                    'cookie': ch.get('cookie', ''),
+                    'category': ch.get('category'),
+                    'stream_type': ch.get('stream_type', 'dash'),
+                    'updated_at': datetime.now().isoformat(),
+                    'needs_category': not ch.get('category')
+                }
+                
+                # Check if exists
+                existing = get_channel(cid)
+                if existing:
+                    logger.info(f"  ↻ Updating: {ch.get('name', 'Unknown')}")
+                    updated_count += 1
+                else:
+                    logger.info(f"  ✓ Adding: {ch.get('name', 'Unknown')}")
+                    saved_count += 1
+                
+                save_channel(channel_data)
+                
+                # Progress logging
+                if (idx + 1) % 10 == 0:
+                    logger.info(f"  📊 Progress: {idx + 1}/{len(channels_list)} channels processed")
+                
+            except Exception as e:
+                logger.error(f"  ✗ Error processing channel {idx}: {e}")
+                error_count += 1
+                continue
         
-        mark_source_processed(content, source_info)
+        # Mark as processed
+        if MONGO_ENABLED:
+            sources_col.update_one(
+                {'hash': content_hash},
+                {'$set': {
+                    'hash': content_hash,
+                    'source': source_info,
+                    'processed_at': datetime.now(),
+                    'channel_count': len(channels_list),
+                    'new': saved_count,
+                    'updated': updated_count,
+                    'errors': error_count
+                }},
+                upsert=True
+            )
         
-        logger.info(f"✅ Loaded {len(channels_list)} channels")
+        logger.info(f"""
+✅ JSON Import Complete:
+   • Total Found: {len(channels_list)}
+   • New: {saved_count}
+   • Updated: {updated_count}
+   • Errors: {error_count}
+""")
+        
         return True
     
+    except json.JSONDecodeError as e:
+        logger.error(f"❌ JSON parse error: {e}")
+        return False
     except Exception as e:
-        logger.error(f"JSON parse error: {e}")
+        logger.error(f"❌ Error processing JSON: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 async def parse_m3u_playlist(content, source_url='', source_info='unknown'):
-    """Parse M3U playlist with better duplicate checking"""
+    """Parse M3U playlist with improved duplicate checking"""
     
-    # Create a unique hash based on first 1000 chars to avoid checking exact same content
-    content_preview = content[:1000] if len(content) > 1000 else content
-    content_hash = hashlib.md5(content_preview.encode()).hexdigest()
+    # Skip duplicate check if content is empty
+    if not content or len(content.strip()) < 10:
+        logger.error("❌ Content is empty or too short")
+        return False
     
+    # Create a unique hash based on content
+    content_hash = hashlib.md5(content.encode()).hexdigest()
+    
+    # Check if processed in last 10 minutes only (more lenient)
     if MONGO_ENABLED:
-        # Check if similar content was processed recently (within 1 hour)
-        one_hour_ago = datetime.now() - timedelta(hours=1)
+        ten_mins_ago = datetime.now() - timedelta(minutes=10)
         recent = sources_col.find_one({
             'hash': content_hash,
-            'processed_at': {'$gte': one_hour_ago}
+            'processed_at': {'$gte': ten_mins_ago}
         })
         if recent:
-            logger.info("⏭️ Similar source processed recently, skipping...")
-            return False
+            logger.info(f"⏭️ Same source processed {(datetime.now() - recent['processed_at']).seconds} seconds ago")
+            # Still return the count as success
+            return True
     
     try:
         # Determine base URL for relative paths
@@ -619,9 +692,10 @@ async def parse_m3u_playlist(content, source_url='', source_info='unknown'):
         if source_url:
             parsed = urlparse(source_url)
             base_url = f"{parsed.scheme}://{parsed.netloc}"
+            logger.info(f"🔗 Base URL: {base_url}")
         
         # Handle servertvhub.site style
-        if 'servertvhub.site' in source_url:
+        if 'servertvhub.site' in source_url or 'playlist.php' in source_url:
             logger.info("🔍 Detected servertvhub.site playlist")
             channels_list = parse_servertvhub_playlist(content, base_url)
         else:
@@ -629,16 +703,22 @@ async def parse_m3u_playlist(content, source_url='', source_info='unknown'):
             channels_list = parse_m3u_content(content, base_url)
         
         if not channels_list:
-            logger.error("❌ No channels found in M3U")
+            logger.error("❌ No channels found in playlist")
             return False
         
-        logger.info(f"✅ Found {len(channels_list)} channels in M3U")
+        logger.info(f"✅ Found {len(channels_list)} channels in playlist")
         
-        # Save channels
+        # Save channels with progress logging
         saved_count = 0
+        skipped_count = 0
+        error_count = 0
+        
         for idx, ch in enumerate(channels_list):
             try:
-                cid = ch.get('id', f"m3u_ch_{idx}_{hashlib.md5(ch['name'].encode()).hexdigest()[:8]}")
+                # Generate unique ID based on name and link
+                unique_str = f"{ch['name']}_{ch['link']}"
+                unique_hash = hashlib.md5(unique_str.encode()).hexdigest()[:8]
+                cid = ch.get('id', f"m3u_{unique_hash}")
                 
                 channel_data = {
                     'id': cid,
@@ -652,10 +732,24 @@ async def parse_m3u_playlist(content, source_url='', source_info='unknown'):
                     'needs_category': not ch.get('category')
                 }
                 
+                # Check if channel already exists
+                existing = get_channel(cid)
+                if existing:
+                    logger.info(f"  ↻ Updating: {ch['name']}")
+                    skipped_count += 1
+                else:
+                    logger.info(f"  ✓ Adding: {ch['name']}")
+                
                 save_channel(channel_data)
                 saved_count += 1
+                
+                # Log progress every 10 channels
+                if (idx + 1) % 10 == 0:
+                    logger.info(f"  📊 Progress: {idx + 1}/{len(channels_list)} channels processed")
+                
             except Exception as e:
-                logger.error(f"Error saving channel {idx}: {e}")
+                logger.error(f"  ✗ Error saving channel {idx} ({ch.get('name', 'Unknown')}): {e}")
+                error_count += 1
                 continue
         
         # Mark source as processed
@@ -665,13 +759,24 @@ async def parse_m3u_playlist(content, source_url='', source_info='unknown'):
                 {'$set': {
                     'hash': content_hash,
                     'source': source_info,
+                    'source_url': source_url,
                     'processed_at': datetime.now(),
-                    'channel_count': saved_count
+                    'channel_count': saved_count,
+                    'total_found': len(channels_list),
+                    'skipped': skipped_count,
+                    'errors': error_count
                 }},
                 upsert=True
             )
         
-        logger.info(f"✅ Successfully saved {saved_count} channels from M3U")
+        logger.info(f"""
+✅ M3U Import Complete:
+   • Total Found: {len(channels_list)}
+   • New/Updated: {saved_count}
+   • Already Existed: {skipped_count}
+   • Errors: {error_count}
+""")
+        
         return True
     
     except Exception as e:
@@ -991,7 +1096,10 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         [InlineKeyboardButton("🤖 AI Categorize", callback_data="admin_categorize")],
         [InlineKeyboardButton("📊 Statistics", callback_data="admin_stats")],
-        [InlineKeyboardButton("🗑️ Clear Database", callback_data="admin_clear")],
+        [
+            InlineKeyboardButton("🗑️ Clear Cache", callback_data="admin_clear_cache"),
+            InlineKeyboardButton("🗑️ Clear All", callback_data="admin_clear")
+        ],
         [InlineKeyboardButton("🏠 Main Menu", callback_data="start")]
     ]
     
@@ -1189,6 +1297,23 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await asyncio.sleep(2)
         await admin_handler(update, context)
+    elif data == "admin_clear_cache":
+        await query.answer("🗑️ Clearing duplicate check cache...")
+        if MONGO_ENABLED:
+            # Only clear old source records (older than 1 hour)
+            one_hour_ago = datetime.now() - timedelta(hours=1)
+            result = sources_col.delete_many({'processed_at': {'$lt': one_hour_ago}})
+            await query.message.edit_text(
+                f"✅ <b>Cache Cleared!</b>\n\n🗑️ Removed {result.deleted_count} old source records\n\n<i>You can now re-import sources</i>",
+                parse_mode='HTML'
+            )
+        else:
+            await query.message.edit_text(
+                "ℹ️ <b>Cache Not Applicable</b>\n\n<i>Memory mode doesn't use source tracking</i>",
+                parse_mode='HTML'
+            )
+        await asyncio.sleep(2)
+        await admin_handler(update, context)
 
 async def category_handler_with_page(update: Update, context: ContextTypes.DEFAULT_TYPE, cat: str, page: int):
     """Show paginated channels in a category with specific page"""
@@ -1234,45 +1359,29 @@ Page: {page + 1}
     )
         
         # Reconstruct the callback data
-        async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    data = query.data
-
     if data.startswith("catpage_"):
         cat, page = data.replace("catpage_", "").rsplit("_", 1)
         page = int(page)
         context.user_data['current_category'] = cat
         query.data = f"cat_{cat}_{page}"
         await category_handler(update, context)
-
     elif data.startswith("cat_"):
         await category_handler(update, context)
-
     elif data.startswith("play_"):
         await play_handler(update, context)
-
     elif data == "admin":
         await admin_handler(update, context)
-
     elif data == "admin_categorize":
         await query.answer("🤖 Starting AI categorization...", show_alert=True)
         await auto_categorize_all()
         await query.answer("✅ Categorization complete!", show_alert=True)
         await admin_handler(update, context)
-
     elif data == "admin_upload_json":
         await query.answer()
         context.user_data['expecting_file_type'] = 'json'
         await query.message.edit_text(
-            "📤 <b>Upload JSON File</b>\n\n"
-            "<b>Required format:</b>\n"
-            "<code>[\n  {\n    \"name\": \"Channel Name\",\n    \"link\": \"stream_url\",\n    "
-            "\"logo\": \"logo_url\",\n    \"drmScheme\": \"clearkey\",\n    "
-            "\"drmLicense\": \"key:id\",\n    \"cookie\": \"cookie_string\"\n  }\n]</code>\n\n"
-            "<i>Send your .json file now</i>",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("🔙 Back", callback_data="admin")]]
-            ),
+            "📤 <b>Upload JSON File</b>\n\n<b>Required format:</b>\n<code>[\n  {\n    \"name\": \"Channel Name\",\n    \"link\": \"stream_url\",\n    \"logo\": \"logo_url\",\n    \"drmScheme\": \"clearkey\",\n    \"drmLicense\": \"key:id\",\n    \"cookie\": \"cookie_string\"\n  }\n]</code>\n\n<i>Send your .json file now</i>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin")]]),
             parse_mode='HTML'
         )
     elif data == "admin_upload_m3u":
