@@ -2,850 +2,814 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TV Player</title>
-    <script src="https://cdn.jsdelivr.net/npm/shaka-player@4.7.0/dist/shaka-player.compiled.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{{ channel.name }} - Live TV</title>
+    
+    <!-- Shaka Player -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/shaka-player/4.7.0/shaka-player.compiled.min.js"></script>
+    
+    <!-- Video.js for HLS -->
+    <link href="https://vjs.zencdn.net/8.6.1/video-js.css" rel="stylesheet">
+    <script src="https://vjs.zencdn.net/8.6.1/video.min.js"></script>
+    
+    <!-- HLS.js for better HLS support -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-
+        
         body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             background: #000;
             color: #fff;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             overflow: hidden;
         }
-
-        #container {
+        
+        .container {
             width: 100vw;
             height: 100vh;
             display: flex;
             flex-direction: column;
-            position: relative;
         }
-
-        #header {
-            background: linear-gradient(180deg, rgba(0,0,0,0.9) 0%, transparent 100%);
-            padding: 15px 20px;
+        
+        .header {
+            background: linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+            padding: 12px 15px;
             position: absolute;
             top: 0;
             left: 0;
             right: 0;
-            z-index: 100;
-            transition: opacity 0.3s, transform 0.3s;
-        }
-
-        #header.hidden {
-            opacity: 0;
-            transform: translateY(-100%);
-            pointer-events: none;
-        }
-
-        #channel-info {
+            z-index: 1000;
             display: flex;
             align-items: center;
-            gap: 15px;
+            justify-content: space-between;
         }
-
-        #channel-logo {
-            width: 50px;
-            height: 50px;
-            object-fit: contain;
+        
+        .channel-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .channel-logo {
+            width: 40px;
+            height: 40px;
             border-radius: 8px;
+            object-fit: contain;
             background: rgba(255,255,255,0.1);
-            padding: 5px;
+            padding: 4px;
         }
-
-        #channel-details h1 {
-            font-size: 20px;
+        
+        .channel-details h1 {
+            font-size: 16px;
             font-weight: 600;
-            margin-bottom: 4px;
+            margin: 0;
         }
-
-        #channel-details p {
-            font-size: 14px;
-            color: #888;
+        
+        .channel-details p {
+            font-size: 12px;
+            opacity: 0.7;
+            margin: 2px 0 0 0;
         }
-
-        #video-container {
+        
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            font-size: 12px;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #00ff00;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .player-wrapper {
             flex: 1;
+            position: relative;
+            background: #000;
             display: flex;
             align-items: center;
             justify-content: center;
-            background: #000;
-            position: relative;
         }
-
-        #video {
+        
+        #video-player {
+            width: 100%;
+            height: 100%;
+            background: #000;
+        }
+        
+        video {
             width: 100%;
             height: 100%;
             object-fit: contain;
         }
-
-        #loading {
+        
+        .loading {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
             text-align: center;
-            z-index: 10;
+            z-index: 100;
         }
-
-        #loading.hidden {
-            display: none;
-        }
-
+        
         .spinner {
-            border: 4px solid rgba(255,255,255,0.1);
-            border-top: 4px solid #fff;
-            border-radius: 50%;
             width: 50px;
             height: 50px;
+            border: 4px solid rgba(255,255,255,0.2);
+            border-top-color: #fff;
+            border-radius: 50%;
             animation: spin 1s linear infinite;
             margin: 0 auto 15px;
         }
-
+        
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            to { transform: rotate(360deg); }
         }
-
-        #error {
+        
+        .error-message {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
             text-align: center;
-            background: rgba(255,0,0,0.9);
-            padding: 25px 40px;
-            border-radius: 12px;
+            padding: 30px;
+            background: rgba(255,0,0,0.1);
+            border: 2px solid rgba(255,0,0,0.3);
+            border-radius: 10px;
             max-width: 90%;
-            z-index: 20;
             display: none;
         }
-
-        #error.visible {
-            display: block;
-        }
-
-        #error h2 {
-            font-size: 20px;
+        
+        .error-message h2 {
+            color: #ff4444;
             margin-bottom: 10px;
+            font-size: 18px;
         }
-
-        #error p {
+        
+        .error-message p {
+            opacity: 0.8;
             font-size: 14px;
-            opacity: 0.9;
             margin-bottom: 15px;
         }
-
-        #error button {
+        
+        .retry-btn {
             background: #fff;
             color: #000;
             border: none;
-            padding: 10px 25px;
+            padding: 10px 24px;
             border-radius: 6px;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
+            transition: opacity 0.2s;
         }
-
-        #controls {
-            background: linear-gradient(0deg, rgba(0,0,0,0.9) 0%, transparent 100%);
-            padding: 20px;
+        
+        .retry-btn:hover {
+            opacity: 0.9;
+        }
+        
+        .controls {
             position: absolute;
             bottom: 0;
             left: 0;
             right: 0;
-            z-index: 100;
-            transition: opacity 0.3s, transform 0.3s;
-        }
-
-        #controls.hidden {
+            background: linear-gradient(0deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
+            padding: 20px 15px 15px;
             opacity: 0;
-            transform: translateY(100%);
-            pointer-events: none;
+            transition: opacity 0.3s;
         }
-
-        #progress-container {
-            width: 100%;
-            height: 6px;
-            background: rgba(255,255,255,0.2);
-            border-radius: 3px;
-            margin-bottom: 15px;
-            cursor: pointer;
-            position: relative;
+        
+        .player-wrapper:hover .controls,
+        .player-wrapper:hover .header {
+            opacity: 1;
         }
-
-        #progress-bar {
-            height: 100%;
-            background: #ff0000;
-            border-radius: 3px;
-            width: 0%;
-            transition: width 0.1s;
-        }
-
-        #control-buttons {
+        
+        .control-buttons {
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: center;
             gap: 15px;
         }
-
-        .btn-group {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        button {
-            background: rgba(255,255,255,0.1);
-            border: none;
-            color: #fff;
-            padding: 10px 15px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.2s;
-        }
-
-        button:hover {
+        
+        .control-btn {
             background: rgba(255,255,255,0.2);
-        }
-
-        button:active {
-            background: rgba(255,255,255,0.3);
-        }
-
-        #play-pause {
-            font-size: 24px;
-            padding: 10px 20px;
-        }
-
-        #time-display {
-            font-size: 14px;
-            color: #ddd;
-            min-width: 100px;
-        }
-
-        #quality-selector {
-            background: rgba(255,255,255,0.1);
             border: none;
-            color: #fff;
-            padding: 8px 12px;
-            border-radius: 6px;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .control-btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: scale(1.1);
+        }
+        
+        .control-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: #fff;
+        }
+        
+        .quality-selector {
+            position: absolute;
+            bottom: 70px;
+            right: 15px;
+            background: rgba(0,0,0,0.9);
+            border-radius: 8px;
+            padding: 10px;
+            display: none;
+            min-width: 120px;
+        }
+        
+        .quality-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.2s;
             font-size: 14px;
         }
-
-        #quality-selector option {
-            background: #222;
-            color: #fff;
-        }
-
-        .live-badge {
-            background: #ff0000;
-            color: #fff;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
-            display: inline-block;
-        }
-
-        #debug-info {
-            position: absolute;
-            top: 80px;
-            right: 10px;
-            background: rgba(0,0,0,0.95);
-            padding: 12px 15px;
-            font-size: 11px;
-            border-radius: 8px;
-            max-width: 400px;
-            word-wrap: break-word;
-            z-index: 50;
-            font-family: 'Courier New', monospace;
-            line-height: 1.6;
-            max-height: 400px;
-            overflow-y: auto;
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-
-        #debug-info::-webkit-scrollbar {
-            width: 6px;
-        }
-
-        #debug-info::-webkit-scrollbar-track {
+        
+        .quality-option:hover {
             background: rgba(255,255,255,0.1);
-            border-radius: 3px;
         }
-
-        #debug-info::-webkit-scrollbar-thumb {
-            background: rgba(255,255,255,0.3);
-            border-radius: 3px;
+        
+        .quality-option.active {
+            background: rgba(255,255,255,0.2);
+            font-weight: 600;
         }
-
-        .debug-line {
-            margin: 3px 0;
-            padding: 2px 0;
+        
+        /* Video.js overrides */
+        .video-js .vjs-big-play-button {
+            display: none;
         }
-
-        .debug-success {
-            color: #00ff00;
-        }
-
-        .debug-error {
-            color: #ff4444;
-            font-weight: bold;
-        }
-
-        .debug-info {
-            color: #00d4ff;
-        }
-
-        .debug-warning {
-            color: #ffaa00;
-        }
-
-        .debug-header {
-            color: #fff;
-            font-weight: bold;
-            border-bottom: 1px solid rgba(255,255,255,0.2);
-            padding-bottom: 5px;
-            margin-bottom: 5px;
-        }
-
-        /* Mobile adjustments */
-        @media (max-width: 768px) {
-            #header {
-                padding: 10px 15px;
-            }
-
-            #channel-logo {
-                width: 40px;
-                height: 40px;
-            }
-
-            #channel-details h1 {
-                font-size: 16px;
-            }
-
-            #channel-details p {
-                font-size: 12px;
-            }
-
-            #controls {
-                padding: 15px;
-            }
-
-            #control-buttons {
-                flex-wrap: wrap;
-            }
-
-            .btn-group {
-                flex: 1;
-                justify-content: center;
-            }
-
-            button {
-                padding: 8px 12px;
-                font-size: 12px;
-            }
-
-            #play-pause {
-                font-size: 20px;
-                padding: 8px 16px;
-            }
-
-            #debug-info {
-                font-size: 9px;
-                max-width: 250px;
-                max-height: 250px;
-                top: 60px;
-                right: 5px;
-                padding: 8px 10px;
-            }
+        
+        .video-js .vjs-control-bar {
+            background: linear-gradient(0deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%);
         }
     </style>
 </head>
 <body>
-    <div id="container">
-        <!-- Header with channel info -->
-        <div id="header">
-            <div id="channel-info">
-                <img id="channel-logo" 
-                     src="" 
-                     alt="Logo" 
-                     onerror="this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2250%22 height=%2250%22%3E%3Crect fill=%22%23333%22 width=%2250%22 height=%2250%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 fill=%22%23fff%22 font-size=%2220%22%3ETV%3C/text%3E%3C/svg%3E'">
-                <div id="channel-details">
-                    <h1 id="channel-name">Loading...</h1>
-                    <p><span class="live-badge">🔴 LIVE</span></p>
+    <div class="container">
+        <div class="header">
+            <div class="channel-info">
+                {% if channel.logo %}
+                <img src="{{ channel.logo }}" alt="{{ channel.name }}" class="channel-logo" onerror="this.style.display='none'">
+                {% endif %}
+                <div class="channel-details">
+                    <h1>{{ channel.name }}</h1>
+                    <p>{{ channel.category }}</p>
                 </div>
             </div>
+            <div class="status">
+                <span class="status-dot"></span>
+                <span>LIVE</span>
+            </div>
         </div>
-
-        <!-- Video container -->
-        <div id="video-container">
-            <video id="video" playsinline></video>
-            
-            <!-- Loading spinner -->
-            <div id="loading">
+        
+        <div class="player-wrapper">
+            <div class="loading" id="loading">
                 <div class="spinner"></div>
                 <p>Loading stream...</p>
             </div>
-
-            <!-- Error message -->
-            <div id="error">
+            
+            <div class="error-message" id="error-message">
                 <h2>⚠️ Playback Error</h2>
-                <p id="error-message">Unable to load the stream</p>
-                <button onclick="location.reload()">🔄 Retry</button>
+                <p id="error-text">Unable to load the stream. Please try again.</p>
+                <button class="retry-btn" onclick="retryPlayback()">Retry</button>
+            </div>
+            
+            <video id="video-player" class="video-js vjs-default-skin" controls autoplay playsinline></video>
+            
+            <div class="controls">
+                <div class="control-buttons">
+                    <button class="control-btn" id="play-pause" onclick="togglePlayPause()">
+                        <svg viewBox="0 0 24 24" id="pause-icon">
+                            <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/>
+                        </svg>
+                        <svg viewBox="0 0 24 24" id="play-icon" style="display:none;">
+                            <path d="M8 5v14l11-7z"/>
+                        </svg>
+                    </button>
+                    
+                    <button class="control-btn" onclick="toggleMute()">
+                        <svg viewBox="0 0 24 24" id="volume-icon">
+                            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/>
+                        </svg>
+                    </button>
+                    
+                    <button class="control-btn" onclick="toggleFullscreen()">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="quality-selector" id="quality-selector">
+                <!-- Quality options will be added dynamically -->
             </div>
         </div>
-
-        <!-- Player controls -->
-        <div id="controls">
-            <div id="progress-container">
-                <div id="progress-bar"></div>
-            </div>
-            <div id="control-buttons">
-                <div class="btn-group">
-                    <button id="play-pause">▶️</button>
-                    <span id="time-display">LIVE</span>
-                </div>
-                <div class="btn-group">
-                    <button id="mute-btn">🔊</button>
-                    <select id="quality-selector">
-                        <option value="auto">Auto</option>
-                    </select>
-                    <button id="fullscreen-btn">⛶</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Debug panel -->
-        <div id="debug-info"></div>
     </div>
-
+    
     <script>
-        // Get channel ID from URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const channelId = urlParams.get('id');
-
-        // DOM elements
-        const video = document.getElementById('video');
-        const loading = document.getElementById('loading');
-        const errorDiv = document.getElementById('error');
-        const errorMessage = document.getElementById('error-message');
-        const header = document.getElementById('header');
-        const controls = document.getElementById('controls');
-        const playPauseBtn = document.getElementById('play-pause');
-        const muteBtn = document.getElementById('mute-btn');
-        const fullscreenBtn = document.getElementById('fullscreen-btn');
-        const qualitySelector = document.getElementById('quality-selector');
-        const debugInfo = document.getElementById('debug-info');
-
-        // Global variables
+        const channelData = {
+            id: '{{ channel.id }}',
+            name: '{{ channel.name }}',
+            link: '{{ channel.link }}',
+            streamType: '{{ channel.stream_type|default("dash") }}',
+            drmScheme: '{{ channel.drmScheme|default("") }}',
+            drmLicense: '{{ channel.drmLicense|default("") }}',
+            cookie: '{{ channel.cookie|default("") }}',
+            needsProxy: {{ 'true' if channel.needs_proxy else 'false' }},
+            logo: '{{ channel.logo|default("") }}'
+        };
+        
+        const webappUrl = '{{ webapp_url }}';
+        
         let player;
-        let hideControlsTimeout;
-        let channelData;
-
-        // Debug logging with colors
-        function debug(msg, type = 'info') {
-            console.log('[Player]', msg);
-            const line = document.createElement('div');
-            line.className = `debug-line debug-${type}`;
-            const timestamp = new Date().toLocaleTimeString();
-            line.textContent = `[${timestamp}] ${msg}`;
-            debugInfo.appendChild(line);
-            debugInfo.scrollTop = debugInfo.scrollHeight;
+        let shakaPlayer;
+        let hlsPlayer;
+        let videoElement;
+        
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
         }
-
-        // Hex to Base64 conversion for ClearKey DRM
-        function hexToBase64(hexString) {
-            const hex = hexString.replace(/\s/g, '');
-            const bytes = [];
-            for (let i = 0; i < hex.length; i += 2) {
-                bytes.push(parseInt(hex.substr(i, 2), 16));
-            }
-            return btoa(String.fromCharCode.apply(null, bytes));
-        }
-
-        // Custom network request filter to inject cookies
-        class CookieRequestFilter {
-            constructor(cookie) {
-                this.cookie = cookie;
-            }
-
-            request(type, request) {
-                // Add cookie to all network requests
-                if (this.cookie) {
-                    request.headers['Cookie'] = this.cookie;
-                }
-                
-                // Add required headers for JioCinema CDN
-                request.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
-                request.headers['Origin'] = 'https://www.jiocinema.com';
-                request.headers['Referer'] = 'https://www.jiocinema.com/';
-                request.headers['Accept'] = '*/*';
-            }
-        }
-
-        // Fetch channel data from API
-        async function loadChannel() {
-            try {
-                debug('=== PLAYER INITIALIZING ===', 'header');
-                debug(`Fetching channel data: ${channelId}`, 'info');
-                
-                const response = await fetch(`/api/channel/${channelId}`);
-                
-                if (!response.ok) {
-                    throw new Error(`Channel not found (HTTP ${response.status})`);
-                }
-                
-                channelData = await response.json();
-                
-                debug(`✓ Channel loaded: ${channelData.name}`, 'success');
-                debug(`Category: ${channelData.category}`, 'info');
-                debug(`DRM Scheme: ${channelData.drmScheme || 'None'}`, 'info');
-                
-                if (channelData.cookie) {
-                    const cookiePreview = channelData.cookie.substring(0, 50);
-                    debug(`✓ Cookie present: ${cookiePreview}...`, 'success');
-                } else {
-                    debug(`✗ No cookie found!`, 'warning');
-                }
-                
-                debug(`Manifest URL: ${channelData.link}`, 'info');
-                
-                // Update UI
-                document.getElementById('channel-name').textContent = channelData.name;
-                document.getElementById('channel-logo').src = channelData.logo || '';
-                document.title = `${channelData.name} - Live TV`;
-                
-                // Initialize player
-                await initPlayer();
-                
-            } catch (err) {
-                debug(`✗✗✗ ERROR loading channel: ${err.message}`, 'error');
-                showError('Failed to load channel: ' + err.message);
-            }
-        }
-
-        // Initialize Shaka Player
-        async function initPlayer() {
-            try {
-                debug('--- SHAKA PLAYER SETUP ---', 'header');
-                debug('Checking browser support...', 'info');
-                
-                if (!shaka.Player.isBrowserSupported()) {
-                    throw new Error('Browser not supported for DASH playback');
-                }
-                debug('✓ Browser is supported', 'success');
-
-                debug('Creating Shaka Player instance...', 'info');
-                player = new shaka.Player(video);
-                debug('✓ Player instance created', 'success');
-
-                // Register network filter for cookies
-                debug('Registering cookie filter...', 'info');
-                const cookieFilter = new CookieRequestFilter(channelData.cookie);
-                player.getNetworkingEngine().registerRequestFilter(
-                    cookieFilter.request.bind(cookieFilter)
-                );
-                debug('✓ Cookie filter registered (will inject into all requests)', 'success');
-
-                // Configure player with optimized settings
-                debug('Configuring player settings...', 'info');
-                player.configure({
-                    streaming: {
-                        bufferingGoal: 30,
-                        rebufferingGoal: 5,
-                        bufferBehind: 30,
-                        retryParameters: {
-                            maxAttempts: 5,
-                            baseDelay: 1000,
-                            backoffFactor: 2,
-                            fuzzFactor: 0.5,
-                            timeout: 30000
-                        }
-                    },
-                    manifest: {
-                        retryParameters: {
-                            maxAttempts: 5,
-                            baseDelay: 1000,
-                            backoffFactor: 2,
-                            timeout: 30000
-                        }
-                    }
-                });
-                debug('✓ Player configured', 'success');
-
-                // Setup DRM if needed
-                if (channelData.drmScheme && channelData.drmLicense) {
-                    debug('--- DRM SETUP ---', 'header');
-                    setupDRM();
-                }
-
-                // Error handling
-                player.addEventListener('error', onPlayerError);
-
-                // Load manifest (DIRECT URL from API - no proxy)
-                const manifestUrl = channelData.link;
-                debug('--- LOADING MANIFEST ---', 'header');
-                debug(`URL: ${manifestUrl}`, 'info');
-                debug('Loading manifest...', 'info');
-
-                await player.load(manifestUrl);
-                
-                debug('✓✓✓ Manifest loaded successfully!', 'success');
-                
-                // Setup quality selector
-                setupQualitySelector();
-
-                // Hide loading spinner
-                loading.classList.add('hidden');
-                
-                // Start playback
-                debug('--- STARTING PLAYBACK ---', 'header');
-                debug('Attempting to play video...', 'info');
-                
-                await video.play();
-                playPauseBtn.textContent = '⏸️';
-
-                debug('✓✓✓ PLAYBACK STARTED SUCCESSFULLY!', 'success');
-                debug('=== PLAYER READY ===', 'header');
-                
-                // Hide debug panel after 10 seconds
-                setTimeout(() => {
-                    debugInfo.style.display = 'none';
-                }, 10000);
-
-            } catch (err) {
-                debug('--- CRITICAL ERROR ---', 'header');
-                debug(`✗✗✗ Player initialization failed: ${err.message}`, 'error');
-                
-                if (err.code) {
-                    debug(`Error code: ${err.code}`, 'error');
-                }
-                
-                if (err.data) {
-                    debug(`Error details: ${JSON.stringify(err.data)}`, 'error');
-                }
-                
-                showError('Playback failed: ' + err.message);
-                console.error('Full error:', err);
-            }
-        }
-
-        // Setup DRM (ClearKey)
-        function setupDRM() {
-            if (channelData.drmScheme.toLowerCase() === 'clearkey') {
-                debug('DRM Type: ClearKey', 'info');
-                
-                // Parse license format: "keyHex:kidHex"
-                const parts = channelData.drmLicense.split(':');
-                
-                if (parts.length !== 2) {
-                    debug('✗ Invalid ClearKey format (expected key:kid)', 'error');
-                    return;
-                }
-
-                const [keyHex, kidHex] = parts;
-                debug(`Key (hex): ${keyHex.substring(0, 16)}...`, 'info');
-                debug(`KID (hex): ${kidHex.substring(0, 16)}...`, 'info');
-
-                try {
-                    // Convert hex to base64
-                    const keyBase64 = hexToBase64(keyHex);
-                    const kidBase64 = hexToBase64(kidHex);
-                    
-                    debug(`Key (base64): ${keyBase64.substring(0, 16)}...`, 'info');
-                    debug(`KID (base64): ${kidBase64.substring(0, 16)}...`, 'info');
-
-                    // Configure ClearKey DRM
-                    player.configure({
-                        drm: {
-                            clearKeys: {
-                                [kidBase64]: keyBase64
-                            }
-                        }
-                    });
-
-                    debug('✓ ClearKey DRM configured successfully', 'success');
-                    
-                } catch (e) {
-                    debug(`✗ ClearKey setup error: ${e.message}`, 'error');
-                }
-            } else {
-                debug(`Unsupported DRM: ${channelData.drmScheme}`, 'warning');
-            }
-        }
-
-        // Setup quality selector
-        function setupQualitySelector() {
-            const tracks = player.getVariantTracks();
-            debug(`Found ${tracks.length} quality tracks`, 'info');
-            
-            qualitySelector.innerHTML = '<option value="auto">Auto</option>';
-            
-            // Get unique quality heights
-            const qualities = new Set();
-            tracks.forEach(track => {
-                if (track.height) {
-                    qualities.add(track.height);
-                }
-            });
-            
-            // Add quality options
-            Array.from(qualities).sort((a, b) => b - a).forEach(height => {
-                const option = document.createElement('option');
-                option.value = height;
-                option.textContent = `${height}p`;
-                qualitySelector.appendChild(option);
-                debug(`Quality available: ${height}p`, 'info');
-            });
-            
-            // Quality change handler
-            qualitySelector.addEventListener('change', (e) => {
-                if (e.target.value === 'auto') {
-                    player.configure({abr: {enabled: true}});
-                    debug('✓ Auto quality enabled', 'success');
-                } else {
-                    player.configure({abr: {enabled: false}});
-                    const targetHeight = parseInt(e.target.value);
-                    const track = tracks.find(t => t.height === targetHeight);
-                    if (track) {
-                        player.selectVariantTrack(track);
-                        debug(`✓ Quality changed to ${targetHeight}p`, 'success');
-                    }
-                }
-            });
-        }
-
-        // Show error message
+        
         function showError(message) {
-            loading.classList.add('hidden');
-            errorMessage.textContent = message;
-            errorDiv.classList.add('visible');
+            hideLoading();
+            document.getElementById('error-text').textContent = message;
+            document.getElementById('error-message').style.display = 'block';
         }
-
-        // Player error handler
-        function onPlayerError(event) {
-            const error = event.detail;
-            console.error('Shaka Player Error:', error);
-            
-            debug('--- PLAYBACK ERROR ---', 'header');
-            debug(`✗ Error code: ${error.code}`, 'error');
-            debug(`✗ Message: ${error.message}`, 'error');
-            
-            if (error.data) {
-                debug(`✗ Additional data: ${JSON.stringify(error.data)}`, 'error');
-            }
-            
-            showError(error.message || 'Playback error occurred');
+        
+        function retryPlayback() {
+            document.getElementById('error-message').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
+            initPlayer();
         }
-
-        // ===== PLAYER CONTROLS =====
-
-        // Play/Pause button
-        playPauseBtn.addEventListener('click', () => {
+        
+        function togglePlayPause() {
+            const video = document.getElementById('video-player');
+            const pauseIcon = document.getElementById('pause-icon');
+            const playIcon = document.getElementById('play-icon');
+            
             if (video.paused) {
                 video.play();
-                playPauseBtn.textContent = '⏸️';
-                debug('▶ Resumed playback', 'info');
+                pauseIcon.style.display = 'block';
+                playIcon.style.display = 'none';
             } else {
                 video.pause();
-                playPauseBtn.textContent = '▶️';
-                debug('⏸ Paused playback', 'info');
+                pauseIcon.style.display = 'none';
+                playIcon.style.display = 'block';
             }
-        });
-
-        // Mute button
-        muteBtn.addEventListener('click', () => {
+        }
+        
+        function toggleMute() {
+            const video = document.getElementById('video-player');
             video.muted = !video.muted;
-            muteBtn.textContent = video.muted ? '🔇' : '🔊';
-            debug(video.muted ? '🔇 Muted' : '🔊 Unmuted', 'info');
-        });
-
-        // Fullscreen button
-        fullscreenBtn.addEventListener('click', () => {
+        }
+        
+        function toggleFullscreen() {
+            const container = document.querySelector('.player-wrapper');
+            
             if (!document.fullscreenElement) {
-                document.getElementById('container').requestFullscreen().catch(err => {
-                    debug(`✗ Fullscreen error: ${err.message}`, 'error');
+                container.requestFullscreen().catch(err => {
+                    console.error('Fullscreen error:', err);
                 });
             } else {
                 document.exitFullscreen();
             }
-        });
-
-        // ===== AUTO-HIDE CONTROLS =====
-
-        function resetHideControlsTimer() {
-            clearTimeout(hideControlsTimeout);
-            header.classList.remove('hidden');
-            controls.classList.remove('hidden');
+        }
+        
+        async function initPlayer() {
+            videoElement = document.getElementById('video-player');
             
-            hideControlsTimeout = setTimeout(() => {
-                if (!video.paused) {
-                    header.classList.add('hidden');
-                    controls.classList.add('hidden');
+            let streamUrl = channelData.link;
+            
+            // Use proxy if needed
+            if (channelData.needsProxy) {
+                streamUrl = `${webappUrl}/proxy/${channelData.id}`;
+            }
+            
+            console.log('Stream Type:', channelData.streamType);
+            console.log('Stream URL:', streamUrl);
+            
+            try {
+                if (channelData.streamType === 'hls' || streamUrl.includes('.m3u8')) {
+                    // Use HLS.js for HLS streams
+                    await initHLSPlayer(streamUrl);
+                } else {
+                    // Use Shaka Player for DASH streams
+                    await initShakaPlayer(streamUrl);
                 }
-            }, 3000);
+            } catch (error) {
+                console.error('Player initialization error:', error);
+                showError('Failed to initialize player: ' + error.message);
+            }
         }
-
-        document.getElementById('container').addEventListener('mousemove', resetHideControlsTimer);
-        document.getElementById('container').addEventListener('touchstart', resetHideControlsTimer);
-        document.getElementById('container').addEventListener('click', resetHideControlsTimer);
-
-        // ===== VIDEO EVENT LISTENERS =====
-
-        video.addEventListener('playing', () => {
-            debug('▶ Video is playing', 'success');
-        });
-
-        video.addEventListener('waiting', () => {
-            debug('⏳ Buffering...', 'warning');
-        });
-
-        video.addEventListener('pause', () => {
-            debug('⏸ Video paused', 'info');
-        });
-
-        video.addEventListener('error', (e) => {
-            debug(`✗ Video element error: ${e.message}`, 'error');
-        });
-
-        video.addEventListener('loadedmetadata', () => {
-            debug('✓ Video metadata loaded', 'success');
-        });
-
-        // ===== START PLAYER =====
-
-        if (channelId) {
-            loadChannel();
-        } else {
-            debug('✗✗✗ No channel ID provided in URL', 'error');
-            showError('No channel ID provided');
+        
+        async function initHLSPlayer(streamUrl) {
+            console.log('Initializing HLS player...');
+            
+            if (Hls.isSupported()) {
+                hlsPlayer = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    backBufferLength: 90,
+                    maxBufferLength: 30,
+                    maxMaxBufferLength: 600,
+                    xhrSetup: function(xhr, url) {
+                        if (channelData.cookie) {
+                            xhr.setRequestHeader('Cookie', channelData.cookie);
+                        }
+                    }
+                });
+                
+                hlsPlayer.loadSource(streamUrl);
+                hlsPlayer.attachMedia(videoElement);
+                
+                hlsPlayer.on(Hls.Events.MANIFEST_PARSED, function() {
+                    console.log('HLS manifest parsed');
+                    hideLoading();
+                    videoElement.play().catch(e => {
+                        console.error('Play error:', e);
+                        showError('Autoplay failed. Please click play button.');
+                    });
+                });
+                
+                hlsPlayer.on(Hls.Events.ERROR, function(event, data) {
+                    console.error('HLS error:', data);
+                    if (data.fatal) {
+                        switch(data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                console.log('Network error, trying to recover...');
+                                hlsPlayer.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                console.log('Media error, trying to recover...');
+                                hlsPlayer.recoverMediaError();
+                                break;
+                            default:
+                                showError('Fatal streaming error: ' + data.details);
+                                break;
+                        }
+                    }
+                });
+                
+                // Quality levels
+                hlsPlayer.on(Hls.Events.LEVEL_LOADED, function(event, data) {
+                    updateQualitySelector(hlsPlayer.levels);
+                });
+                
+            } else if (videoElement.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                console.log('Using native HLS support');
+                videoElement.src = streamUrl;
+                
+                videoElement.addEventListener('loadedmetadata', function() {
+                    hideLoading();
+                    videoElement.play().catch(e => {
+                        console.error('Play error:', e);
+                        showError('Autoplay failed. Please click play button.');
+                    });
+                });
+                
+                videoElement.addEventListener('error', function(e) {
+                    console.error('Video error:', e);
+                    showError('Stream playback error');
+                });
+            } else {
+                showError('HLS not supported in this browser');
+            }
         }
-
-        // ===== CLEANUP =====
-
-        window.addEventListener('beforeunload', () => {
-            if (player) {
-                debug('Destroying player...', 'info');
-                player.destroy();
+        
+        async function initShakaPlayer(streamUrl) {
+            console.log('Initializing Shaka player...');
+            
+            // Check if Shaka Player is supported
+            if (!shaka.Player.isBrowserSupported()) {
+                showError('Browser not supported for DASH playback');
+                return;
+            }
+            
+            shakaPlayer = new shaka.Player(videoElement);
+            
+            // Configure player
+            shakaPlayer.configure({
+                streaming: {
+                    retryParameters: {
+                        timeout: 30000,
+                        maxAttempts: 5,
+                        baseDelay: 1000,
+                        backoffFactor: 2,
+                        fuzzFactor: 0.5
+                    },
+                    bufferingGoal: 30,
+                    rebufferingGoal: 2
+                }
+            });
+            
+            // Set up DRM if needed
+            if (channelData.drmScheme && channelData.drmLicense) {
+                console.log('Configuring DRM:', channelData.drmScheme);
+                
+                if (channelData.drmScheme === 'clearkey') {
+                    // Parse clearkey license
+                    const [keyId, key] = channelData.drmLicense.split(':');
+                    
+                    shakaPlayer.configure({
+                        drm: {
+                            clearKeys: {
+                                [keyId]: key
+                            }
+                        }
+                    });
+                } else if (channelData.drmScheme === 'widevine') {
+                    shakaPlayer.configure({
+                        drm: {
+                            servers: {
+                                'com.widevine.alpha': channelData.drmLicense
+                            }
+                        }
+                    });
+                }
+            }
+            
+            // Set up network filters for cookies
+            if (channelData.cookie) {
+                shakaPlayer.getNetworkingEngine().registerRequestFilter(function(type, request) {
+                    request.headers['Cookie'] = channelData.cookie;
+                });
+            }
+            
+            // Error handling
+            shakaPlayer.addEventListener('error', function(error) {
+                console.error('Shaka error:', error);
+                showError('Playback error: ' + error.detail.message);
+            });
+            
+            // Load the stream
+            try {
+                await shakaPlayer.load(streamUrl);
+                console.log('Stream loaded successfully');
+                hideLoading();
+                
+                videoElement.play().catch(e => {
+                    console.error('Play error:', e);
+                    showError('Autoplay failed. Please click play button.');
+                });
+                
+                // Set up quality selector
+                const tracks = shakaPlayer.getVariantTracks();
+                updateQualitySelector(tracks);
+                
+            } catch (error) {
+                console.error('Load error:', error);
+                showError('Failed to load stream: ' + error.message);
+            }
+        }
+        
+        function updateQualitySelector(qualities) {
+            const selector = document.getElementById('quality-selector');
+            selector.innerHTML = '';
+            
+            if (!qualities || qualities.length <= 1) {
+                return; // No quality options to show
+            }
+            
+            // Add auto option
+            const autoOption = document.createElement('div');
+            autoOption.className = 'quality-option active';
+            autoOption.textContent = 'Auto';
+            autoOption.onclick = function() {
+                if (hlsPlayer) {
+                    hlsPlayer.currentLevel = -1; // Auto
+                } else if (shakaPlayer) {
+                    shakaPlayer.configure({abr: {enabled: true}});
+                }
+                document.querySelectorAll('.quality-option').forEach(el => el.classList.remove('active'));
+                this.classList.add('active');
+            };
+            selector.appendChild(autoOption);
+            
+            // Add quality options
+            if (hlsPlayer) {
+                qualities.forEach((level, index) => {
+                    const option = document.createElement('div');
+                    option.className = 'quality-option';
+                    option.textContent = level.height + 'p';
+                    option.onclick = function() {
+                        hlsPlayer.currentLevel = index;
+                        document.querySelectorAll('.quality-option').forEach(el => el.classList.remove('active'));
+                        this.classList.add('active');
+                    };
+                    selector.appendChild(option);
+                });
+            } else if (shakaPlayer) {
+                // Get unique heights
+                const heights = [...new Set(qualities.map(q => q.height))].sort((a, b) => b - a);
+                
+                heights.forEach(height => {
+                    const option = document.createElement('div');
+                    option.className = 'quality-option';
+                    option.textContent = height + 'p';
+                    option.onclick = function() {
+                        const track = qualities.find(q => q.height === height);
+                        if (track) {
+                            shakaPlayer.configure({abr: {enabled: false}});
+                            shakaPlayer.selectVariantTrack(track, true);
+                        }
+                        document.querySelectorAll('.quality-option').forEach(el => el.classList.remove('active'));
+                        this.classList.add('active');
+                    };
+                    selector.appendChild(option);
+                });
+            }
+        }
+        
+        // Video event listeners
+        videoElement.addEventListener('play', function() {
+            document.getElementById('pause-icon').style.display = 'block';
+            document.getElementById('play-icon').style.display = 'none';
+        });
+        
+        videoElement.addEventListener('pause', function() {
+            document.getElementById('pause-icon').style.display = 'none';
+            document.getElementById('play-icon').style.display = 'block';
+        });
+        
+        videoElement.addEventListener('waiting', function() {
+            console.log('Buffering...');
+        });
+        
+        videoElement.addEventListener('playing', function() {
+            console.log('Playing...');
+        });
+        
+        // Prevent screen sleep
+        if ('wakeLock' in navigator) {
+            let wakeLock = null;
+            
+            async function requestWakeLock() {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Wake lock activated');
+                } catch (err) {
+                    console.error('Wake lock error:', err);
+                }
+            }
+            
+            videoElement.addEventListener('play', requestWakeLock);
+            
+            document.addEventListener('visibilitychange', async () => {
+                if (wakeLock !== null && document.visibilityState === 'visible') {
+                    await requestWakeLock();
+                }
+            });
+        }
+        
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                console.log('Page hidden');
+            } else {
+                console.log('Page visible');
+                // Resume playback if needed
+                if (videoElement.paused && !videoElement.ended) {
+                    videoElement.play().catch(e => console.error('Resume error:', e));
+                }
             }
         });
-
-        // Toggle debug panel on double-click
-        document.getElementById('container').addEventListener('dblclick', (e) => {
-            if (e.target === video || e.target === document.getElementById('video-container')) {
-                debugInfo.style.display = debugInfo.style.display === 'none' ? 'block' : 'none';
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            switch(e.key) {
+                case ' ':
+                case 'k':
+                    e.preventDefault();
+                    togglePlayPause();
+                    break;
+                case 'f':
+                    e.preventDefault();
+                    toggleFullscreen();
+                    break;
+                case 'm':
+                    e.preventDefault();
+                    toggleMute();
+                    break;
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    videoElement.currentTime -= 10;
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    videoElement.currentTime += 10;
+                    break;
             }
         });
+        
+        // Touch controls for mobile
+        let touchStartX = 0;
+        let touchStartY = 0;
+        
+        document.querySelector('.player-wrapper').addEventListener('touchstart', function(e) {
+            touchStartX = e.touches[0].clientX;
+            touchStartY = e.touches[0].clientY;
+        });
+        
+        document.querySelector('.player-wrapper').addEventListener('touchend', function(e) {
+            const touchEndX = e.changedTouches[0].clientX;
+            const touchEndY = e.changedTouches[0].clientY;
+            
+            const diffX = touchEndX - touchStartX;
+            const diffY = touchEndY - touchStartY;
+            
+            // Swipe detection
+            if (Math.abs(diffX) > 50 && Math.abs(diffX) > Math.abs(diffY)) {
+                // Horizontal swipe
+                if (diffX > 0) {
+                    // Swipe right - forward 10s
+                    videoElement.currentTime += 10;
+                } else {
+                    // Swipe left - backward 10s
+                    videoElement.currentTime -= 10;
+                }
+            }
+        });
+        
+        // Auto-hide controls
+        let controlsTimeout;
+        const playerWrapper = document.querySelector('.player-wrapper');
+        
+        function showControls() {
+            document.querySelector('.controls').style.opacity = '1';
+            document.querySelector('.header').style.opacity = '1';
+            
+            clearTimeout(controlsTimeout);
+            controlsTimeout = setTimeout(hideControls, 3000);
+        }
+        
+        function hideControls() {
+            if (!videoElement.paused) {
+                document.querySelector('.controls').style.opacity = '0';
+                document.querySelector('.header').style.opacity = '0';
+            }
+        }
+        
+        playerWrapper.addEventListener('mousemove', showControls);
+        playerWrapper.addEventListener('touchstart', showControls);
+        
+        // Initialize player on page load
+        window.addEventListener('load', function() {
+            console.log('Page loaded, initializing player...');
+            initPlayer();
+        });
+        
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            if (shakaPlayer) {
+                shakaPlayer.destroy();
+            }
+            if (hlsPlayer) {
+                hlsPlayer.destroy();
+            }
+        });
+        
+        // Send playback stats back to parent (if in Telegram WebApp)
+        if (window.Telegram && window.Telegram.WebApp) {
+            const tg = window.Telegram.WebApp;
+            tg.ready();
+            tg.expand();
+            
+            // Send stats periodically
+            setInterval(function() {
+                if (!videoElement.paused) {
+                    console.log('Playing: ' + channelData.name);
+                    // You can send analytics here
+                }
+            }, 30000); // Every 30 seconds
+        }
     </script>
 </body>
-</html>        #channel
+</html>
