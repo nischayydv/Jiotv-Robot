@@ -3,7 +3,7 @@ import re
 import json
 import logging
 import asyncio
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -28,24 +28,23 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN', 'YOUR_BOT_TOKEN_HERE')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 ADMIN_IDS = [int(x) for x in os.environ.get('ADMIN_IDS', '').split(',') if x.strip()]
 PORT = int(os.environ.get('PORT', 5000))
-WEBAPP_URL = os.environ.get('WEBAPP_URL', f'https://your-app.herokuapp.com')
+WEBAPP_URL = os.environ.get('WEBAPP_URL', 'https://your-app.herokuapp.com')
 MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/')
 
-# Pagination settings
-CATEGORIES_PER_PAGE = 8  # 2 rows x 4 columns
-CHANNELS_PER_PAGE = 8    # 2 rows x 4 columns
+# Pagination settings - 2 columns layout
+CATEGORIES_PER_PAGE = 10  # 5 rows x 2 columns
+CHANNELS_PER_PAGE = 10    # 5 rows x 2 columns
 
 # MongoDB Setup
 try:
     mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-    mongo_client.server_info()  # Test connection
+    mongo_client.server_info()
     db = mongo_client['tv_bot']
     channels_col = db['channels']
     categories_col = db['categories']
     stats_col = db['stats']
     sources_col = db['sources']
     
-    # Create indexes
     channels_col.create_index([('id', ASCENDING)], unique=True)
     channels_col.create_index([('category', ASCENDING)])
     channels_col.create_index([('name', ASCENDING)])
@@ -125,7 +124,15 @@ def get_categories():
         ]
         result = list(channels_col.aggregate(pipeline))
         return {item['_id']: item['channels'] for item in result}
-    return categories_cache
+    
+    # Build categories from cache
+    cats = {}
+    for cid, ch in channels_cache.items():
+        cat = ch.get('category', 'Other')
+        if cat not in cats:
+            cats[cat] = []
+        cats[cat].append(cid)
+    return cats
 
 def get_channels_by_category(category):
     """Get channels in a category"""
@@ -155,7 +162,7 @@ def mark_source_processed(content, source_info):
             'hash': content_hash,
             'source': source_info,
             'processed_at': datetime.now(),
-            'channel_count': len(json.loads(content)) if isinstance(content, str) else len(content)
+            'channel_count': len(json.loads(content)) if isinstance(content, str) else 0
         }},
         upsert=True
     )
@@ -191,10 +198,88 @@ def get_stats():
     else:
         return {
             'channels': len(channels_cache),
-            'categories': len(categories_cache),
+            'categories': len(get_categories()),
             'plays': bot_stats['total_plays'],
             'users': len(bot_stats['total_users'])
         }
+
+# ============= M3U PARSING =============
+
+def parse_m3u_content(content, base_url=''):
+    """Parse M3U/M3U8 playlist content"""
+    channels = []
+    lines = content.strip().split('\n')
+    
+    current_channel = {}
+    
+    for i, line in enumerate(lines):
+        line = line.strip()
+        
+        if line.startswith('#EXTINF:'):
+            # Parse channel info
+            # Format: #EXTINF:-1 tvg-id="id" tvg-name="name" tvg-logo="logo" group-title="category",Channel Name
+            
+            # Extract attributes
+            tvg_id_match = re.search(r'tvg-id="([^"]*)"', line)
+            tvg_name_match = re.search(r'tvg-name="([^"]*)"', line)
+            tvg_logo_match = re.search(r'tvg-logo="([^"]*)"', line)
+            group_match = re.search(r'group-title="([^"]*)"', line)
+            
+            # Extract channel name (after last comma)
+            name_match = re.search(r',(.+)$', line)
+            
+            current_channel = {
+                'id': tvg_id_match.group(1) if tvg_id_match else f"ch_{i}",
+                'name': name_match.group(1).strip() if name_match else (tvg_name_match.group(1) if tvg_name_match else f"Channel {i}"),
+                'logo': tvg_logo_match.group(1) if tvg_logo_match else '',
+                'category': group_match.group(1) if group_match else None,
+            }
+            
+        elif line and not line.startswith('#') and current_channel:
+            # This is the stream URL
+            stream_url = line.strip()
+            
+            # Handle relative URLs
+            if base_url and not stream_url.startswith(('http://', 'https://')):
+                stream_url = urljoin(base_url, stream_url)
+            
+            current_channel['link'] = stream_url
+            current_channel['stream_type'] = 'hls'  # M3U usually contains HLS streams
+            
+            # Detect if it needs special handling
+            if 'servertvhub.site' in stream_url or 'live.php' in stream_url:
+                current_channel['needs_proxy'] = True
+            
+            channels.append(current_channel.copy())
+            current_channel = {}
+    
+    return channels
+
+def parse_servertvhub_playlist(content, base_url):
+    """Parse servertvhub.site style playlist"""
+    channels = []
+    
+    # Try to extract channel data from PHP response
+    # This handles both JSON and HTML responses
+    
+    try:
+        # Try JSON first
+        data = json.loads(content)
+        if isinstance(data, list):
+            for item in data:
+                channels.append({
+                    'id': item.get('id', f"ch_{len(channels)}"),
+                    'name': item.get('name', 'Unknown'),
+                    'logo': item.get('logo', ''),
+                    'link': item.get('url', item.get('link', '')),
+                    'category': item.get('category'),
+                    'needs_proxy': True
+                })
+    except:
+        # Parse as M3U format
+        channels = parse_m3u_content(content, base_url)
+    
+    return channels
 
 # ============= FLASK ROUTES =============
 
@@ -213,11 +298,11 @@ def player():
         return "Channel not found", 404
     
     update_stats('plays', 1)
-    return render_template('player.html', channel=channel)
+    return render_template('player.html', channel=channel, webapp_url=WEBAPP_URL)
 
 @app.route('/proxy/<channel_id>')
 def proxy_manifest(channel_id):
-    """Proxy DASH manifest with cookies"""
+    """Proxy DASH/HLS manifest with cookies"""
     try:
         channel = get_channel(channel_id)
         if not channel:
@@ -229,7 +314,6 @@ def proxy_manifest(channel_id):
         if not manifest_url:
             return jsonify({'error': 'No manifest URL'}), 400
         
-        # Prepare headers
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Referer': 'https://www.jiocinema.com/',
@@ -239,29 +323,22 @@ def proxy_manifest(channel_id):
         if cookie:
             headers['Cookie'] = cookie
         
-        # Fetch manifest
-        logger.info(f"Proxying manifest: {manifest_url}")
         response = requests.get(manifest_url, headers=headers, timeout=10)
         
         if response.status_code != 200:
             logger.error(f"Failed to fetch manifest: {response.status_code}")
             return jsonify({'error': f'Manifest fetch failed: {response.status_code}'}), 502
         
-        # Modify manifest to use proxy for segments
         content = response.text
+        content_type = 'application/dash+xml' if '.mpd' in manifest_url else 'application/vnd.apple.mpegurl'
         
-        # Get base URL from manifest
-        from urllib.parse import urlparse, urljoin
-        parsed = urlparse(manifest_url)
-        base_url = f"{parsed.scheme}://{parsed.netloc}"
-        manifest_base = manifest_url.rsplit('/', 1)[0] + '/'
-        
-        # Replace relative URLs with proxied URLs
-        content = content.replace('BaseURL>', f'BaseURL>{WEBAPP_URL}/proxy-segment/{channel_id}/')
+        # Modify URLs to use proxy
+        if channel.get('needs_proxy'):
+            content = content.replace('BaseURL>', f'BaseURL>{WEBAPP_URL}/proxy-segment/{channel_id}/')
         
         return Response(
             content,
-            mimetype='application/dash+xml',
+            mimetype=content_type,
             headers={
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Methods': 'GET, OPTIONS',
@@ -285,11 +362,9 @@ def proxy_segment(channel_id, segment_path):
         manifest_url = channel.get('link', '')
         cookie = channel.get('cookie', '')
         
-        # Construct full segment URL
         manifest_base = manifest_url.rsplit('/', 1)[0] + '/'
         segment_url = urljoin(manifest_base, segment_path)
         
-        # Prepare headers
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Referer': 'https://www.jiocinema.com/',
@@ -299,14 +374,12 @@ def proxy_segment(channel_id, segment_path):
         if cookie:
             headers['Cookie'] = cookie
         
-        # Fetch segment
         response = requests.get(segment_url, headers=headers, stream=True, timeout=10)
         
         if response.status_code != 200:
             logger.error(f"Segment fetch failed: {response.status_code}")
             return jsonify({'error': 'Segment fetch failed'}), 502
         
-        # Stream response
         return Response(
             response.iter_content(chunk_size=8192),
             mimetype=response.headers.get('Content-Type', 'video/mp4'),
@@ -325,7 +398,6 @@ def proxy_segment(channel_id, segment_path):
 
 @app.route('/api/channels')
 def api_channels():
-    """API endpoint for all channels"""
     channels = get_all_channels()
     formatted = []
     
@@ -335,48 +407,11 @@ def api_channels():
             'name': ch['name'],
             'logo': ch.get('logo', ''),
             'link': ch.get('link', ''),
-            'drmScheme': ch.get('drmScheme', ''),
-            'drmLicense': ch.get('drmLicense', ''),
-            'cookie': ch.get('cookie', ''),
             'category': ch.get('category', 'Other'),
-            'updated_at': ch.get('updated_at', datetime.now().isoformat())
+            'stream_type': ch.get('stream_type', 'dash')
         })
     
     return jsonify(formatted)
-
-@app.route('/api/channel/<channel_id>')
-def api_channel(channel_id):
-    """Get single channel data"""
-    ch = get_channel(channel_id)
-    
-    if not ch:
-        return jsonify({'error': 'Channel not found'}), 404
-    
-    return jsonify({
-        'id': channel_id,
-        'name': ch['name'],
-        'logo': ch.get('logo', ''),
-        'link': ch.get('link', ''),
-        'drmScheme': ch.get('drmScheme', ''),
-        'drmLicense': ch.get('drmLicense', ''),
-        'cookie': ch.get('cookie', ''),
-        'category': ch.get('category', 'Other')
-    })
-
-@app.route('/api/categories')
-def api_categories():
-    """Get all categories"""
-    categories = get_categories()
-    return jsonify({
-        'categories': [{'name': cat, 'count': len(channels)} 
-                      for cat, channels in categories.items()]
-    })
-
-@app.route('/api/category/<category>')
-def api_category_channels(category):
-    """Get channels by category"""
-    channels = get_channels_by_category(category)
-    return jsonify({'category': category, 'channels': channels})
 
 @app.route('/health')
 def health():
@@ -452,7 +487,7 @@ def categorize_basic(name):
 # ============= DATA PARSING =============
 
 def parse_json_channels(content, source_info="unknown"):
-    """Parse JSON format channels with duplicate checking"""
+    """Parse JSON format channels"""
     
     if check_source_processed(content):
         logger.info("⏭️ Source already processed, skipping...")
@@ -482,6 +517,7 @@ def parse_json_channels(content, source_info="unknown"):
                 'drmLicense': ch.get('drmLicense', ''),
                 'cookie': ch.get('cookie', ''),
                 'category': ch.get('category'),
+                'stream_type': ch.get('stream_type', 'dash'),
                 'updated_at': datetime.now().isoformat(),
                 'needs_category': not ch.get('category')
             }
@@ -495,6 +531,57 @@ def parse_json_channels(content, source_info="unknown"):
     
     except Exception as e:
         logger.error(f"JSON parse error: {e}")
+        return False
+
+async def parse_m3u_playlist(content, source_url='', source_info='unknown'):
+    """Parse M3U playlist"""
+    
+    if check_source_processed(content):
+        logger.info("⏭️ Source already processed, skipping...")
+        return True
+    
+    try:
+        # Determine base URL for relative paths
+        base_url = ''
+        if source_url:
+            parsed = urlparse(source_url)
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+        
+        # Handle servertvhub.site style
+        if 'servertvhub.site' in source_url:
+            channels_list = parse_servertvhub_playlist(content, base_url)
+        else:
+            channels_list = parse_m3u_content(content, base_url)
+        
+        if not channels_list:
+            logger.error("No channels found in M3U")
+            return False
+        
+        # Save channels
+        for idx, ch in enumerate(channels_list):
+            cid = ch.get('id', f"m3u_ch_{idx}")
+            
+            channel_data = {
+                'id': cid,
+                'name': ch['name'],
+                'link': ch['link'],
+                'logo': ch.get('logo', ''),
+                'category': ch.get('category'),
+                'stream_type': ch.get('stream_type', 'hls'),
+                'needs_proxy': ch.get('needs_proxy', False),
+                'updated_at': datetime.now().isoformat(),
+                'needs_category': not ch.get('category')
+            }
+            
+            save_channel(channel_data)
+        
+        mark_source_processed(content, source_info)
+        
+        logger.info(f"✅ Loaded {len(channels_list)} channels from M3U")
+        return True
+    
+    except Exception as e:
+        logger.error(f"M3U parse error: {e}")
         return False
 
 async def auto_categorize_all():
@@ -548,22 +635,24 @@ def paginate_list(items, page, per_page):
     end = start + per_page
     return items[start:end], len(items)
 
-def create_pagination_keyboard(items, page, per_page, callback_prefix, back_callback="start"):
-    """Create paginated keyboard with 2 rows"""
+def create_pagination_keyboard(items, page, per_page, callback_prefix, back_callback="start", columns=2):
+    """Create paginated keyboard with 2 columns"""
     current_items, total_items = paginate_list(items, page, per_page)
     total_pages = (total_items + per_page - 1) // per_page
     
     keyboard = []
     
-    for i in range(0, len(current_items), 4):
+    # Create rows with specified columns
+    for i in range(0, len(current_items), columns):
         row = []
-        for item in current_items[i:i+4]:
+        for item in current_items[i:i+columns]:
             row.append(item)
         keyboard.append(row)
     
+    # Navigation buttons
     nav_buttons = []
     if page > 0:
-        nav_buttons.append(InlineKeyboardButton("⬅️ Previous", callback_data=f"{callback_prefix}_page_{page-1}"))
+        nav_buttons.append(InlineKeyboardButton("⬅️ Back", callback_data=f"{callback_prefix}_page_{page-1}"))
     
     nav_buttons.append(InlineKeyboardButton(f"📄 {page+1}/{total_pages}", callback_data="noop"))
     
@@ -580,7 +669,7 @@ def create_pagination_keyboard(items, page, per_page, callback_prefix, back_call
 # ============= TELEGRAM BOT HANDLERS =============
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main menu with paginated categories"""
+    """Main menu with paginated categories (2 columns)"""
     user = update.effective_user
     update_stats('users', user.id)
     
@@ -603,7 +692,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         0,
         CATEGORIES_PER_PAGE,
         "categories",
-        "start"
+        "start",
+        columns=2
     )
     
     keyboard.insert(-1, [InlineKeyboardButton("🔍 Search Channels", switch_inline_query_current_chat="")])
@@ -659,7 +749,8 @@ async def categories_page_handler(update: Update, context: ContextTypes.DEFAULT_
         page,
         CATEGORIES_PER_PAGE,
         "categories",
-        "start"
+        "start",
+        columns=2
     )
     
     keyboard.insert(-1, [InlineKeyboardButton("🔍 Search Channels", switch_inline_query_current_chat="")])
@@ -684,7 +775,7 @@ async def categories_page_handler(update: Update, context: ContextTypes.DEFAULT_
     )
 
 async def category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show paginated channels in a category"""
+    """Show paginated channels in a category (2 columns, full names)"""
     query = update.callback_query
     await query.answer()
     
@@ -700,8 +791,10 @@ async def category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     channel_buttons = []
     for ch in channels:
+        # Use full channel name (truncate only if very long)
+        name = ch['name'][:40] + '...' if len(ch['name']) > 40 else ch['name']
         channel_buttons.append(InlineKeyboardButton(
-            f"▶️ {ch['name']}", 
+            f"▶️ {name}", 
             callback_data=f"play_{ch['id']}"
         ))
     
@@ -710,7 +803,8 @@ async def category_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         page,
         CHANNELS_PER_PAGE,
         f"cat_{cat}",
-        "start"
+        "start",
+        columns=2
     )
     
     text = f"""
@@ -754,6 +848,7 @@ async def play_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📂 Category: {ch.get('category', 'Other')}
 🔐 DRM: {ch.get('drmScheme', 'None')}
+📡 Type: {ch.get('stream_type', 'DASH').upper()}
 
 <i>Click "Watch Now" to open the player</i>
 """
@@ -774,8 +869,14 @@ async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     keyboard = [
-        [InlineKeyboardButton("📤 Upload JSON", callback_data="admin_upload")],
-        [InlineKeyboardButton("🔄 Load from URL", callback_data="admin_url")],
+        [
+            InlineKeyboardButton("📤 Upload JSON", callback_data="admin_upload_json"),
+            InlineKeyboardButton("📤 Upload M3U", callback_data="admin_upload_m3u")
+        ],
+        [
+            InlineKeyboardButton("🔗 Load JSON URL", callback_data="admin_url_json"),
+            InlineKeyboardButton("🔗 Load M3U URL", callback_data="admin_url_m3u")
+        ],
         [InlineKeyboardButton("🤖 AI Categorize", callback_data="admin_categorize")],
         [InlineKeyboardButton("📊 Statistics", callback_data="admin_stats")],
         [InlineKeyboardButton("🗑️ Clear Database", callback_data="admin_clear")],
@@ -805,8 +906,17 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     file = update.message.document
-    if not file or not file.file_name.endswith('.json'):
-        await update.message.reply_text("❌ Please send a .json file only!")
+    if not file:
+        await update.message.reply_text("❌ Please send a file!")
+        return
+    
+    file_type = context.user_data.get('expecting_file_type', 'json')
+    
+    if file_type == 'json' and not file.file_name.endswith('.json'):
+        await update.message.reply_text("❌ Please send a .json file!")
+        return
+    elif file_type == 'm3u' and not (file.file_name.endswith('.m3u') or file.file_name.endswith('.m3u8')):
+        await update.message.reply_text("❌ Please send a .m3u or .m3u8 file!")
         return
     
     msg = await update.message.reply_text("⏳ Processing your file...")
@@ -816,7 +926,14 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         content = await file_obj.download_as_bytearray()
         content_str = content.decode('utf-8')
         
-        if parse_json_channels(content_str, f"file:{file.file_name}"):
+        success = False
+        
+        if file_type == 'json':
+            success = parse_json_channels(content_str, f"file:{file.file_name}")
+        elif file_type == 'm3u':
+            success = await parse_m3u_playlist(content_str, '', f"file:{file.file_name}")
+        
+        if success:
             await msg.edit_text("⏳ Categorizing channels...")
             await auto_categorize_all()
             stats = get_stats()
@@ -826,11 +943,14 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='HTML'
             )
         else:
-            await msg.edit_text("❌ Invalid JSON format or source already processed!")
+            await msg.edit_text("❌ Invalid format or source already processed!")
     
     except Exception as e:
         logger.error(f"File error: {e}")
         await msg.edit_text(f"❌ Error: {str(e)}")
+    
+    finally:
+        context.user_data.pop('expecting_file_type', None)
 
 async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -845,7 +965,17 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await start(update, context)
     elif data.startswith("categories_page_"):
         await categories_page_handler(update, context)
-    elif data.startswith("cat_") and not data.startswith("cat_page_"):
+    elif data.startswith("cat_") and "_page_" in data:
+        # Handle category pagination
+        parts = data.split('_')
+        page = int(parts[-1])
+        cat = '_'.join(parts[1:-2])
+        
+        # Reconstruct the callback data
+        context.user_data['current_category'] = cat
+        query.data = f"cat_{cat}_{page}"
+        await category_handler(update, context)
+    elif data.startswith("cat_"):
         await category_handler(update, context)
     elif data.startswith("play_"):
         await play_handler(update, context)
@@ -856,17 +986,33 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await auto_categorize_all()
         await query.answer("✅ Categorization complete!", show_alert=True)
         await admin_handler(update, context)
-    elif data == "admin_upload":
+    elif data == "admin_upload_json":
         await query.answer()
+        context.user_data['expecting_file_type'] = 'json'
         await query.message.edit_text(
             "📤 <b>Upload JSON File</b>\n\n<b>Required format:</b>\n<code>[\n  {\n    \"name\": \"Channel Name\",\n    \"link\": \"stream_url\",\n    \"logo\": \"logo_url\",\n    \"drmScheme\": \"clearkey\",\n    \"drmLicense\": \"key:id\",\n    \"cookie\": \"cookie_string\"\n  }\n]</code>\n\n<i>Send your .json file now</i>",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin")]]),
             parse_mode='HTML'
         )
-    elif data == "admin_url":
-        context.user_data['awaiting_url'] = True
+    elif data == "admin_upload_m3u":
+        await query.answer()
+        context.user_data['expecting_file_type'] = 'm3u'
         await query.message.edit_text(
-            "🔄 <b>Load from URL</b>\n\n<i>Send the JSON URL now:</i>",
+            "📤 <b>Upload M3U/M3U8 File</b>\n\n<b>Supported format:</b>\n<code>#EXTINF:-1 tvg-id=\"id\" tvg-name=\"name\" tvg-logo=\"logo\" group-title=\"category\",Channel Name\nhttp://stream-url.m3u8</code>\n\n<i>Send your .m3u or .m3u8 file now</i>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin")]]),
+            parse_mode='HTML'
+        )
+    elif data == "admin_url_json":
+        context.user_data['awaiting_url'] = 'json'
+        await query.message.edit_text(
+            "🔗 <b>Load JSON from URL</b>\n\n<i>Send the JSON URL now:</i>\n\nExample:\n<code>https://example.com/channels.json</code>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="admin")]]),
+            parse_mode='HTML'
+        )
+    elif data == "admin_url_m3u":
+        context.user_data['awaiting_url'] = 'm3u'
+        await query.message.edit_text(
+            "🔗 <b>Load M3U from URL</b>\n\n<i>Send the M3U/M3U8 URL now:</i>\n\nExamples:\n<code>https://example.com/playlist.m3u8\nhttps://servertvhub.site/playlist.php</code>",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="admin")]]),
             parse_mode='HTML'
         )
@@ -905,11 +1051,25 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle text messages (URL loading)"""
     if context.user_data.get('awaiting_url') and is_admin(update.effective_user.id):
-        context.user_data['awaiting_url'] = False
+        url_type = context.user_data.get('awaiting_url')
+        context.user_data['awaiting_url'] = None
+        
         msg = await update.message.reply_text("⏳ Loading from URL...")
         
         content = await load_from_url(update.message.text)
-        if content and parse_json_channels(content, f"url:{update.message.text}"):
+        
+        if not content:
+            await msg.edit_text("❌ Failed to load URL!")
+            return
+        
+        success = False
+        
+        if url_type == 'json':
+            success = parse_json_channels(content, f"url:{update.message.text}")
+        elif url_type == 'm3u':
+            success = await parse_m3u_playlist(content, update.message.text, f"url:{update.message.text}")
+        
+        if success:
             await msg.edit_text("⏳ Categorizing channels...")
             await auto_categorize_all()
             stats = get_stats()
@@ -918,7 +1078,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode='HTML'
             )
         else:
-            await msg.edit_text("❌ Failed to load or source already processed!")
+            await msg.edit_text("❌ Failed to parse or source already processed!")
 
 def main():
     # Start Flask
@@ -936,8 +1096,8 @@ def main():
     logger.info(f"📡 Web Server: {WEBAPP_URL}")
     logger.info(f"🤖 Gemini AI: {'ENABLED' if gemini_model else 'DISABLED'}")
     logger.info(f"💾 MongoDB: {'CONNECTED' if MONGO_ENABLED else 'DISABLED'}")
-    logger.info(f"📄 Categories per page: {CATEGORIES_PER_PAGE}")
-    logger.info(f"📺 Channels per page: {CHANNELS_PER_PAGE}")
+    logger.info(f"📄 Categories per page: {CATEGORIES_PER_PAGE} (2 columns)")
+    logger.info(f"📺 Channels per page: {CHANNELS_PER_PAGE} (2 columns)")
     
     app_bot.run_polling(allowed_updates=Update.ALL_TYPES)
 
