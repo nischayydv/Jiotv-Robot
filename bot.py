@@ -1231,7 +1231,7 @@ Page: {page + 1}
         text,
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode='HTML'
-    )])
+    )
         
         # Reconstruct the callback data
         context.user_data['current_category'] = cat
