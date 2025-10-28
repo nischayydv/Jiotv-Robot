@@ -257,14 +257,30 @@ def parse_m3u_content(content, base_url=''):
                 stream_url = urljoin(base_url, stream_url)
             
             current_channel['link'] = stream_url
-            current_channel['stream_type'] = 'hls'  # M3U usually contains HLS streams
+            
+            # Detect stream type and proxy requirements
+            if '.m3u8' in stream_url.lower():
+                current_channel['stream_type'] = 'hls'
+            elif '.mpd' in stream_url.lower():
+                current_channel['stream_type'] = 'dash'
+            else:
+                current_channel['stream_type'] = 'hls'  # Default
             
             # Detect if it needs special handling
-            if 'servertvhub.site' in stream_url or 'live.php' in stream_url:
+            if 'servertvhub.site' in stream_url:
                 current_channel['needs_proxy'] = True
+                logger.info(f"  🔍 ServerTVHub URL detected: {stream_url}")
+                
+                # If it's a PHP endpoint, mark it specially
+                if '.php' in stream_url:
+                    current_channel['is_php_endpoint'] = True
+                    logger.info(f"  ⚙️ PHP endpoint detected - will fetch actual stream")
+            elif 'live.php' in stream_url or 'playlist.php' in stream_url:
+                current_channel['needs_proxy'] = True
+                current_channel['is_php_endpoint'] = True
             
             channels.append(current_channel.copy())
-            logger.info(f"  ✓ Parsed: {current_channel['name']}")
+            logger.info(f"  ✓ Parsed: {current_channel['name']} ({current_channel.get('stream_type', 'unknown')})")
             current_channel = {}
     
     logger.info(f"✅ Parsed {len(channels)} channels from M3U")
@@ -459,6 +475,77 @@ def proxy_segment(channel_id, segment_path):
         
     except Exception as e:
         logger.error(f"Segment proxy error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fetch-stream')
+def fetch_stream():
+    """Fetch actual stream URL from servertvhub.site PHP endpoints"""
+    try:
+        url = request.args.get('url', '')
+        
+        if not url:
+            return jsonify({'error': 'No URL provided'}), 400
+        
+        logger.info(f"🔍 Fetching stream from: {url}")
+        
+        # Prepare headers to mimic browser
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://servertvhub.site/',
+            'Origin': 'https://servertvhub.site',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+        
+        # Fetch the PHP endpoint
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            logger.error(f"❌ Failed to fetch: HTTP {response.status_code}")
+            return jsonify({'error': f'HTTP {response.status_code}'}), response.status_code
+        
+        content = response.text
+        logger.info(f"✅ Received response ({len(content)} bytes)")
+        
+        # Try to parse as JSON first
+        try:
+            data = response.json()
+            logger.info(f"📦 Parsed as JSON: {data}")
+            
+            # Return the JSON data - let the frontend extract the URL
+            return jsonify(data), 200
+            
+        except json.JSONDecodeError:
+            # If not JSON, might be plain text URL
+            logger.info(f"📝 Response is plain text")
+            
+            # Check if it's a direct stream URL
+            if content.strip().startswith('http') and ('.m3u8' in content or '.mpd' in content):
+                return jsonify({'url': content.strip()}), 200
+            
+            # Try to extract URL from HTML/text
+            import re
+            url_pattern = r'https?://[^\s<>"]+\.(?:m3u8|mpd)[^\s<>"]*'
+            urls = re.findall(url_pattern, content)
+            
+            if urls:
+                logger.info(f"🔗 Extracted URL: {urls[0]}")
+                return jsonify({'url': urls[0]}), 200
+            
+            logger.error(f"❌ Could not extract stream URL from response")
+            return jsonify({
+                'error': 'Could not extract stream URL',
+                'content_preview': content[:200]
+            }), 400
+            
+    except requests.Timeout:
+        logger.error(f"⏱️ Timeout fetching stream")
+        return jsonify({'error': 'Request timeout'}), 504
+    except Exception as e:
+        logger.error(f"❌ Error fetching stream: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/channels')
@@ -728,6 +815,7 @@ async def parse_m3u_playlist(content, source_url='', source_info='unknown'):
                     'category': ch.get('category'),
                     'stream_type': ch.get('stream_type', 'hls'),
                     'needs_proxy': ch.get('needs_proxy', False),
+                    'is_php_endpoint': ch.get('is_php_endpoint', False),
                     'updated_at': datetime.now().isoformat(),
                     'needs_category': not ch.get('category')
                 }
