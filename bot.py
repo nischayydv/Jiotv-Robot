@@ -206,20 +206,26 @@ def get_stats():
 # ============= M3U PARSING =============
 
 def parse_m3u_content(content, base_url=''):
-    """Parse M3U/M3U8 playlist content"""
+    """Parse M3U/M3U8 playlist content with better error handling"""
     channels = []
     lines = content.strip().split('\n')
+    
+    logger.info(f"📝 Parsing M3U content ({len(lines)} lines)")
     
     current_channel = {}
     
     for i, line in enumerate(lines):
         line = line.strip()
         
+        # Skip empty lines and comments (except EXTINF)
+        if not line or (line.startswith('#') and not line.startswith('#EXTINF')):
+            continue
+        
         if line.startswith('#EXTINF:'):
             # Parse channel info
             # Format: #EXTINF:-1 tvg-id="id" tvg-name="name" tvg-logo="logo" group-title="category",Channel Name
             
-            # Extract attributes
+            # Extract attributes using regex
             tvg_id_match = re.search(r'tvg-id="([^"]*)"', line)
             tvg_name_match = re.search(r'tvg-name="([^"]*)"', line)
             tvg_logo_match = re.search(r'tvg-logo="([^"]*)"', line)
@@ -228,9 +234,13 @@ def parse_m3u_content(content, base_url=''):
             # Extract channel name (after last comma)
             name_match = re.search(r',(.+)$', line)
             
+            # Generate unique ID
+            ch_name = name_match.group(1).strip() if name_match else (tvg_name_match.group(1) if tvg_name_match else f"Channel {i}")
+            ch_id = tvg_id_match.group(1) if tvg_id_match and tvg_id_match.group(1) else f"ch_{hashlib.md5(ch_name.encode()).hexdigest()[:8]}"
+            
             current_channel = {
-                'id': tvg_id_match.group(1) if tvg_id_match else f"ch_{i}",
-                'name': name_match.group(1).strip() if name_match else (tvg_name_match.group(1) if tvg_name_match else f"Channel {i}"),
+                'id': ch_id,
+                'name': ch_name,
                 'logo': tvg_logo_match.group(1) if tvg_logo_match else '',
                 'category': group_match.group(1) if group_match else None,
             }
@@ -240,7 +250,7 @@ def parse_m3u_content(content, base_url=''):
             stream_url = line.strip()
             
             # Handle relative URLs
-            if base_url and not stream_url.startswith(('http://', 'https://')):
+            if base_url and not stream_url.startswith(('http://', 'https://', 'rtmp://', 'rtsp://')):
                 stream_url = urljoin(base_url, stream_url)
             
             current_channel['link'] = stream_url
@@ -251,35 +261,87 @@ def parse_m3u_content(content, base_url=''):
                 current_channel['needs_proxy'] = True
             
             channels.append(current_channel.copy())
+            logger.info(f"  ✓ Parsed: {current_channel['name']}")
             current_channel = {}
     
+    logger.info(f"✅ Parsed {len(channels)} channels from M3U")
     return channels
 
 def parse_servertvhub_playlist(content, base_url):
-    """Parse servertvhub.site style playlist"""
+    """Parse servertvhub.site style playlist with better error handling"""
     channels = []
     
+    logger.info(f"📝 Parsing servertvhub content (length: {len(content)})")
+    
     # Try to extract channel data from PHP response
-    # This handles both JSON and HTML responses
-    
     try:
-        # Try JSON first
-        data = json.loads(content)
-        if isinstance(data, list):
-            for item in data:
-                channels.append({
-                    'id': item.get('id', f"ch_{len(channels)}"),
-                    'name': item.get('name', 'Unknown'),
-                    'logo': item.get('logo', ''),
-                    'link': item.get('url', item.get('link', '')),
-                    'category': item.get('category'),
-                    'needs_proxy': True
-                })
-    except:
-        # Parse as M3U format
+        # First, try JSON format
+        try:
+            data = json.loads(content)
+            logger.info(f"✅ Parsed as JSON, found {len(data) if isinstance(data, list) else 'unknown'} items")
+            
+            if isinstance(data, list):
+                for idx, item in enumerate(data):
+                    try:
+                        channel = {
+                            'id': item.get('id', f"stv_{idx}"),
+                            'name': item.get('name', item.get('title', f'Channel {idx}')),
+                            'logo': item.get('logo', item.get('image', '')),
+                            'link': item.get('url', item.get('link', item.get('stream_url', ''))),
+                            'category': item.get('category', item.get('group', None)),
+                            'needs_proxy': True
+                        }
+                        
+                        # Make sure we have at least a name and link
+                        if channel['name'] and channel['link']:
+                            channels.append(channel)
+                            logger.info(f"  ✓ Added: {channel['name']}")
+                    except Exception as e:
+                        logger.error(f"  ✗ Error parsing item {idx}: {e}")
+                        continue
+                        
+            elif isinstance(data, dict):
+                # Handle dict with channels key
+                if 'channels' in data:
+                    for idx, item in enumerate(data['channels']):
+                        try:
+                            channel = {
+                                'id': item.get('id', f"stv_{idx}"),
+                                'name': item.get('name', item.get('title', f'Channel {idx}')),
+                                'logo': item.get('logo', item.get('image', '')),
+                                'link': item.get('url', item.get('link', item.get('stream_url', ''))),
+                                'category': item.get('category', item.get('group', None)),
+                                'needs_proxy': True
+                            }
+                            
+                            if channel['name'] and channel['link']:
+                                channels.append(channel)
+                                logger.info(f"  ✓ Added: {channel['name']}")
+                        except Exception as e:
+                            logger.error(f"  ✗ Error parsing channel {idx}: {e}")
+                            continue
+                            
+            return channels
+            
+        except json.JSONDecodeError:
+            logger.info("⚠️ Not JSON format, trying M3U format")
+            pass
+        
+        # If not JSON, try M3U format
         channels = parse_m3u_content(content, base_url)
-    
-    return channels
+        
+        # Mark all servertvhub channels as needing proxy
+        for ch in channels:
+            ch['needs_proxy'] = True
+        
+        logger.info(f"✅ Parsed as M3U, found {len(channels)} channels")
+        return channels
+        
+    except Exception as e:
+        logger.error(f"❌ Error parsing servertvhub playlist: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
 
 # ============= FLASK ROUTES =============
 
@@ -534,11 +596,22 @@ def parse_json_channels(content, source_info="unknown"):
         return False
 
 async def parse_m3u_playlist(content, source_url='', source_info='unknown'):
-    """Parse M3U playlist"""
+    """Parse M3U playlist with better duplicate checking"""
     
-    if check_source_processed(content):
-        logger.info("⏭️ Source already processed, skipping...")
-        return True
+    # Create a unique hash based on first 1000 chars to avoid checking exact same content
+    content_preview = content[:1000] if len(content) > 1000 else content
+    content_hash = hashlib.md5(content_preview.encode()).hexdigest()
+    
+    if MONGO_ENABLED:
+        # Check if similar content was processed recently (within 1 hour)
+        one_hour_ago = datetime.now() - timedelta(hours=1)
+        recent = sources_col.find_one({
+            'hash': content_hash,
+            'processed_at': {'$gte': one_hour_ago}
+        })
+        if recent:
+            logger.info("⏭️ Similar source processed recently, skipping...")
+            return False
     
     try:
         # Determine base URL for relative paths
@@ -549,39 +622,62 @@ async def parse_m3u_playlist(content, source_url='', source_info='unknown'):
         
         # Handle servertvhub.site style
         if 'servertvhub.site' in source_url:
+            logger.info("🔍 Detected servertvhub.site playlist")
             channels_list = parse_servertvhub_playlist(content, base_url)
         else:
+            logger.info("🔍 Parsing standard M3U playlist")
             channels_list = parse_m3u_content(content, base_url)
         
         if not channels_list:
-            logger.error("No channels found in M3U")
+            logger.error("❌ No channels found in M3U")
             return False
         
+        logger.info(f"✅ Found {len(channels_list)} channels in M3U")
+        
         # Save channels
+        saved_count = 0
         for idx, ch in enumerate(channels_list):
-            cid = ch.get('id', f"m3u_ch_{idx}")
-            
-            channel_data = {
-                'id': cid,
-                'name': ch['name'],
-                'link': ch['link'],
-                'logo': ch.get('logo', ''),
-                'category': ch.get('category'),
-                'stream_type': ch.get('stream_type', 'hls'),
-                'needs_proxy': ch.get('needs_proxy', False),
-                'updated_at': datetime.now().isoformat(),
-                'needs_category': not ch.get('category')
-            }
-            
-            save_channel(channel_data)
+            try:
+                cid = ch.get('id', f"m3u_ch_{idx}_{hashlib.md5(ch['name'].encode()).hexdigest()[:8]}")
+                
+                channel_data = {
+                    'id': cid,
+                    'name': ch['name'],
+                    'link': ch['link'],
+                    'logo': ch.get('logo', ''),
+                    'category': ch.get('category'),
+                    'stream_type': ch.get('stream_type', 'hls'),
+                    'needs_proxy': ch.get('needs_proxy', False),
+                    'updated_at': datetime.now().isoformat(),
+                    'needs_category': not ch.get('category')
+                }
+                
+                save_channel(channel_data)
+                saved_count += 1
+            except Exception as e:
+                logger.error(f"Error saving channel {idx}: {e}")
+                continue
         
-        mark_source_processed(content, source_info)
+        # Mark source as processed
+        if MONGO_ENABLED:
+            sources_col.update_one(
+                {'hash': content_hash},
+                {'$set': {
+                    'hash': content_hash,
+                    'source': source_info,
+                    'processed_at': datetime.now(),
+                    'channel_count': saved_count
+                }},
+                upsert=True
+            )
         
-        logger.info(f"✅ Loaded {len(channels_list)} channels from M3U")
+        logger.info(f"✅ Successfully saved {saved_count} channels from M3U")
         return True
     
     except Exception as e:
-        logger.error(f"M3U parse error: {e}")
+        logger.error(f"❌ M3U parse error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 async def auto_categorize_all():
@@ -615,16 +711,29 @@ async def auto_categorize_all():
     logger.info("✅ Categorization complete!")
 
 async def load_from_url(url):
-    """Load playlist from URL"""
+    """Load playlist from URL with better error handling"""
     try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.google.com/'
+        }
+        
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=30) as response:
+            async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=60)) as response:
                 if response.status == 200:
-                    return await response.text()
-                logger.error(f"Failed to load: HTTP {response.status}")
-                return None
+                    content = await response.text()
+                    logger.info(f"✅ Successfully loaded URL: {url} ({len(content)} bytes)")
+                    return content
+                else:
+                    logger.error(f"❌ Failed to load URL: HTTP {response.status}")
+                    return None
+    except asyncio.TimeoutError:
+        logger.error(f"⏱️ Timeout loading URL: {url}")
+        return None
     except Exception as e:
-        logger.error(f"URL load error: {e}")
+        logger.error(f"❌ URL load error: {e}")
         return None
 
 # ============= PAGINATION HELPERS =============
@@ -674,7 +783,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     update_stats('users', user.id)
     
     if bot_settings['maintenance_mode'] and not is_admin(user.id):
-        await update.message.reply_text("🔧 Bot under maintenance!")
+        if update.callback_query:
+            await update.callback_query.answer("🔧 Bot under maintenance!")
+        else:
+            await update.message.reply_text("🔧 Bot under maintenance!")
         return
     
     categories = get_categories()
@@ -919,12 +1031,20 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Please send a .m3u or .m3u8 file!")
         return
     
-    msg = await update.message.reply_text("⏳ Processing your file...")
+    msg = await update.message.reply_text(
+        f"⏳ <b>Processing {file.file_name}</b>\n\n📥 Downloading file...",
+        parse_mode='HTML'
+    )
     
     try:
         file_obj = await context.bot.get_file(file.file_id)
         content = await file_obj.download_as_bytearray()
         content_str = content.decode('utf-8')
+        
+        await msg.edit_text(
+            f"✅ <b>File Downloaded!</b>\n\n📦 Size: {len(content_str)} bytes\n🔄 Parsing {file_type.upper()} data...",
+            parse_mode='HTML'
+        )
         
         success = False
         
@@ -934,20 +1054,31 @@ async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
             success = await parse_m3u_playlist(content_str, '', f"file:{file.file_name}")
         
         if success:
-            await msg.edit_text("⏳ Categorizing channels...")
+            await msg.edit_text(
+                f"✅ <b>Parsing Complete!</b>\n\n🤖 Starting AI categorization...",
+                parse_mode='HTML'
+            )
             await auto_categorize_all()
             stats = get_stats()
             
             await msg.edit_text(
-                f"✅ <b>Success!</b>\n\n📺 Channels: {stats['channels']}\n🗂 Categories: {stats['categories']}\n\n<i>Use /start to browse channels</i>",
+                f"🎉 <b>Successfully Loaded!</b>\n\n📺 Total Channels: {stats['channels']}\n🗂 Categories: {stats['categories']}\n\n<i>Use /start to browse channels</i>",
                 parse_mode='HTML'
             )
         else:
-            await msg.edit_text("❌ Invalid format or source already processed!")
+            await msg.edit_text(
+                f"❌ <b>Parsing Failed!</b>\n\n⚠️ Possible reasons:\n• Invalid {file_type.upper()} format\n• Source already processed\n• Empty or corrupted data\n\n<i>Check logs for details</i>",
+                parse_mode='HTML'
+            )
     
     except Exception as e:
         logger.error(f"File error: {e}")
-        await msg.edit_text(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        await msg.edit_text(
+            f"❌ <b>Error Processing File!</b>\n\n⚠️ Error: <code>{str(e)}</code>",
+            parse_mode='HTML'
+        )
     
     finally:
         context.user_data.pop('expecting_file_type', None)
@@ -961,15 +1092,146 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     if data == "start":
-        update.message = query.message
+        await query.answer()
         await start(update, context)
     elif data.startswith("categories_page_"):
         await categories_page_handler(update, context)
     elif data.startswith("cat_") and "_page_" in data:
-        # Handle category pagination
+        # Handle category pagination - extract page number and category
         parts = data.split('_')
-        page = int(parts[-1])
-        cat = '_'.join(parts[1:-2])
+        # Find 'page' index
+        page_index = parts.index('page')
+        page = int(parts[page_index + 1])
+        # Everything between 'cat' and 'page' is the category name
+        cat = '_'.join(parts[1:page_index])
+        
+        # Call category handler with reconstructed data
+        await category_handler_with_page(update, context, cat, page)
+    elif data.startswith("cat_"):
+        await category_handler(update, context)
+    elif data.startswith("play_"):
+        await play_handler(update, context)
+    elif data == "admin":
+        await admin_handler(update, context)
+    elif data == "admin_categorize":
+        await query.answer("🤖 Starting AI categorization...")
+        msg = await query.message.edit_text("🤖 <b>AI Categorization in Progress...</b>\n\n⏳ Please wait...", parse_mode='HTML')
+        await auto_categorize_all()
+        await msg.edit_text("✅ <b>Categorization Complete!</b>\n\n<i>Returning to admin panel...</i>", parse_mode='HTML')
+        await asyncio.sleep(1)
+        await admin_handler(update, context)
+    elif data == "admin_upload_json":
+        await query.answer()
+        context.user_data['expecting_file_type'] = 'json'
+        await query.message.edit_text(
+            "📤 <b>Upload JSON File</b>\n\n<b>Required format:</b>\n<code>[\n  {\n    \"name\": \"Channel Name\",\n    \"link\": \"stream_url\",\n    \"logo\": \"logo_url\",\n    \"drmScheme\": \"clearkey\",\n    \"drmLicense\": \"key:id\",\n    \"cookie\": \"cookie_string\"\n  }\n]</code>\n\n<i>Send your .json file now</i>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin")]]),
+            parse_mode='HTML'
+        )
+    elif data == "admin_upload_m3u":
+        await query.answer()
+        context.user_data['expecting_file_type'] = 'm3u'
+        await query.message.edit_text(
+            "📤 <b>Upload M3U/M3U8 File</b>\n\n<b>Supported format:</b>\n<code>#EXTINF:-1 tvg-id=\"id\" tvg-name=\"name\" tvg-logo=\"logo\" group-title=\"category\",Channel Name\nhttp://stream-url.m3u8</code>\n\n<i>Send your .m3u or .m3u8 file now</i>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin")]]),
+            parse_mode='HTML'
+        )
+    elif data == "admin_url_json":
+        await query.answer()
+        context.user_data['awaiting_url'] = 'json'
+        await query.message.edit_text(
+            "🔗 <b>Load JSON from URL</b>\n\n<i>Send the JSON URL now:</i>\n\nExample:\n<code>https://example.com/channels.json</code>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="admin")]]),
+            parse_mode='HTML'
+        )
+    elif data == "admin_url_m3u":
+        await query.answer()
+        context.user_data['awaiting_url'] = 'm3u'
+        await query.message.edit_text(
+            "🔗 <b>Load M3U from URL</b>\n\n<i>Send the M3U/M3U8 URL now:</i>\n\nExamples:\n<code>https://example.com/playlist.m3u8\nhttps://servertvhub.site/playlist.php</code>",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Cancel", callback_data="admin")]]),
+            parse_mode='HTML'
+        )
+    elif data == "admin_stats":
+        await query.answer()
+        categories = get_categories()
+        cat_list = "\n".join([f"• <b>{c}</b>: {len(ch)} channels" for c, ch in sorted(categories.items())[:15]])
+        stats = get_stats()
+        
+        await query.message.edit_text(
+            f"📊 <b>Detailed Statistics</b>\n\n<b>Categories:</b>\n{cat_list}\n\n💾 Storage: {'MongoDB' if MONGO_ENABLED else 'Memory Cache'}",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin")]]),
+            parse_mode='HTML'
+        )
+    elif data == "admin_clear":
+        await query.answer("⚠️ This will delete all data!", show_alert=True)
+        keyboard = [
+            [InlineKeyboardButton("❌ Confirm Delete All", callback_data="admin_clear_confirm")],
+            [InlineKeyboardButton("🔙 Cancel", callback_data="admin")]
+        ]
+        await query.message.edit_text(
+            "⚠️ <b>Warning!</b>\n\n<i>This will permanently delete all channels and categories. Are you sure?</i>",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='HTML'
+        )
+    elif data == "admin_clear_confirm":
+        await query.answer()
+        if MONGO_ENABLED:
+            channels_col.delete_many({})
+            sources_col.delete_many({})
+        else:
+            channels_cache.clear()
+            categories_cache.clear()
+        
+        await query.message.edit_text(
+            "✅ <b>Database Cleared!</b>\n\n<i>All channels and categories have been deleted.</i>",
+            parse_mode='HTML'
+        )
+        await asyncio.sleep(2)
+        await admin_handler(update, context)
+
+async def category_handler_with_page(update: Update, context: ContextTypes.DEFAULT_TYPE, cat: str, page: int):
+    """Show paginated channels in a category with specific page"""
+    query = update.callback_query
+    await query.answer()
+    
+    channels = get_channels_by_category(cat)
+    
+    if not channels:
+        await query.answer("No channels in this category!", show_alert=True)
+        return
+    
+    channel_buttons = []
+    for ch in channels:
+        name = ch['name'][:40] + '...' if len(ch['name']) > 40 else ch['name']
+        channel_buttons.append(InlineKeyboardButton(
+            f"▶️ {name}", 
+            callback_data=f"play_{ch['id']}"
+        ))
+    
+    keyboard = create_pagination_keyboard(
+        channel_buttons,
+        page,
+        CHANNELS_PER_PAGE,
+        f"cat_{cat}",
+        "start",
+        columns=2
+    )
+    
+    text = f"""
+📺 <b>{cat}</b>
+
+Total: {len(channels)} channels
+Page: {page + 1}
+
+<i>Select a channel to watch:</i>
+"""
+    
+    await query.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='HTML'
+    )])
         
         # Reconstruct the callback data
         context.user_data['current_category'] = cat
@@ -1054,31 +1316,59 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         url_type = context.user_data.get('awaiting_url')
         context.user_data['awaiting_url'] = None
         
-        msg = await update.message.reply_text("⏳ Loading from URL...")
+        url = update.message.text.strip()
         
-        content = await load_from_url(update.message.text)
+        msg = await update.message.reply_text(
+            f"⏳ <b>Loading from URL...</b>\n\n🔗 URL: <code>{url}</code>\n📥 Downloading content...",
+            parse_mode='HTML'
+        )
         
-        if not content:
-            await msg.edit_text("❌ Failed to load URL!")
-            return
-        
-        success = False
-        
-        if url_type == 'json':
-            success = parse_json_channels(content, f"url:{update.message.text}")
-        elif url_type == 'm3u':
-            success = await parse_m3u_playlist(content, update.message.text, f"url:{update.message.text}")
-        
-        if success:
-            await msg.edit_text("⏳ Categorizing channels...")
-            await auto_categorize_all()
-            stats = get_stats()
+        try:
+            content = await load_from_url(url)
+            
+            if not content:
+                await msg.edit_text(
+                    f"❌ <b>Failed to Load URL!</b>\n\n🔗 URL: <code>{url}</code>\n\n<i>Please check:\n• URL is accessible\n• Network connection\n• URL format is correct</i>",
+                    parse_mode='HTML'
+                )
+                return
+            
             await msg.edit_text(
-                f"✅ <b>Loaded Successfully!</b>\n\n📺 Channels: {stats['channels']}\n🗂 Categories: {stats['categories']}",
+                f"✅ <b>Content Downloaded!</b>\n\n📦 Size: {len(content)} bytes\n🔄 Parsing {url_type.upper()} data...",
                 parse_mode='HTML'
             )
-        else:
-            await msg.edit_text("❌ Failed to parse or source already processed!")
+            
+            success = False
+            
+            if url_type == 'json':
+                success = parse_json_channels(content, f"url:{url}")
+            elif url_type == 'm3u':
+                success = await parse_m3u_playlist(content, url, f"url:{url}")
+            
+            if success:
+                await msg.edit_text(
+                    f"✅ <b>Parsing Complete!</b>\n\n🤖 Starting AI categorization...",
+                    parse_mode='HTML'
+                )
+                await auto_categorize_all()
+                
+                stats = get_stats()
+                await msg.edit_text(
+                    f"🎉 <b>Successfully Loaded!</b>\n\n📺 Total Channels: {stats['channels']}\n🗂 Categories: {stats['categories']}\n\n<i>Use /start to browse channels</i>",
+                    parse_mode='HTML'
+                )
+            else:
+                await msg.edit_text(
+                    f"❌ <b>Parsing Failed!</b>\n\n⚠️ Possible reasons:\n• Invalid {url_type.upper()} format\n• Source already processed\n• Empty or corrupted data\n\n<i>Please check the URL and try again</i>",
+                    parse_mode='HTML'
+                )
+                
+        except Exception as e:
+            logger.error(f"URL loading error: {e}")
+            await msg.edit_text(
+                f"❌ <b>Error Loading URL!</b>\n\n⚠️ Error: <code>{str(e)}</code>\n\n<i>Please try again or contact admin</i>",
+                parse_mode='HTML'
+            )
 
 def main():
     # Start Flask
