@@ -1234,26 +1234,45 @@ Page: {page + 1}
     )
         
         # Reconstruct the callback data
+        async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    data = query.data
+
+    if data.startswith("catpage_"):
+        cat, page = data.replace("catpage_", "").rsplit("_", 1)
+        page = int(page)
         context.user_data['current_category'] = cat
         query.data = f"cat_{cat}_{page}"
         await category_handler(update, context)
+
     elif data.startswith("cat_"):
         await category_handler(update, context)
+
     elif data.startswith("play_"):
         await play_handler(update, context)
+
     elif data == "admin":
         await admin_handler(update, context)
+
     elif data == "admin_categorize":
         await query.answer("🤖 Starting AI categorization...", show_alert=True)
         await auto_categorize_all()
         await query.answer("✅ Categorization complete!", show_alert=True)
         await admin_handler(update, context)
+
     elif data == "admin_upload_json":
         await query.answer()
         context.user_data['expecting_file_type'] = 'json'
         await query.message.edit_text(
-            "📤 <b>Upload JSON File</b>\n\n<b>Required format:</b>\n<code>[\n  {\n    \"name\": \"Channel Name\",\n    \"link\": \"stream_url\",\n    \"logo\": \"logo_url\",\n    \"drmScheme\": \"clearkey\",\n    \"drmLicense\": \"key:id\",\n    \"cookie\": \"cookie_string\"\n  }\n]</code>\n\n<i>Send your .json file now</i>",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="admin")]]),
+            "📤 <b>Upload JSON File</b>\n\n"
+            "<b>Required format:</b>\n"
+            "<code>[\n  {\n    \"name\": \"Channel Name\",\n    \"link\": \"stream_url\",\n    "
+            "\"logo\": \"logo_url\",\n    \"drmScheme\": \"clearkey\",\n    "
+            "\"drmLicense\": \"key:id\",\n    \"cookie\": \"cookie_string\"\n  }\n]</code>\n\n"
+            "<i>Send your .json file now</i>",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("🔙 Back", callback_data="admin")]]
+            ),
             parse_mode='HTML'
         )
     elif data == "admin_upload_m3u":
